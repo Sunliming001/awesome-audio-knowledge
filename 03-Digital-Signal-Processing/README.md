@@ -1,0 +1,23 @@
+# 03. 数字信号处理与算法 (Digital Signal Processing & Algorithms)
+
+本模块介绍音频领域的核心算法，涵盖从基础的语音通信处理到高级的 AI 语音交互。
+
+## 📖 章节导航
+
+1.  **[语音通信 3A 算法 (3A Algorithms)](./01-3A-Algorithms.md)**
+    *   回声消除 (AEC)：自适应滤波器原理与信号流向。
+    *   自动降噪 (ANS)：谱减法、维纳滤波与 AI 降噪。
+    *   自动增益控制 (AGC)：能量检测与动态增益映射。
+
+2.  **[音效处理 (Audio Effects)](./02-Audio-Effects.md)**
+    *   均衡器 (EQ)：PEQ 参数调节与 GEQ 原理。
+    *   动态范围控制 (DRC)：压缩器、限制器的核心参数。
+    *   空间音频 (Spatial Audio)：HRTF 虚拟环绕声与混响模拟。
+
+3.  **[语音交互算法 (Voice Interaction)](./03-Voice-Interaction.md)**
+    *   语音交互全链路：KWS -> ASR -> NLU -> TTS。
+    *   语音活动检测 (VAD) 的意义。
+    *   车载多音区识别与离线化要求。
+
+---
+[返回主目录](../README.md)

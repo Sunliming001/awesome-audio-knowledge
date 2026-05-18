@@ -51,7 +51,37 @@ status_t AudioRecord::set(...) {
 
 ---
 
-## 3. 录音数据流：反向 Proxy 模型
+## 3. Native 层：录音初始化全链路 (Expert Only)
+
+录音的启动逻辑与播放对称，涉及复杂的跨进程握手。其核心调用栈如下：
+
+### 3.1 核心调用栈 (Call Stack)
+1.  **`AudioRecord::set(...)`**：
+    *   校验采样率、通道屏蔽字等参数。
+    *   计算内部缓冲区大小（FrameCount）。
+2.  **`AudioRecord::openRecord_l(...)`**：
+    *   **策略查询**：调用 `AudioSystem::getInputForAttr`。此步骤会向 `AudioPolicyManager` 发起请求，系统会根据 `AudioSource`（如 `VOICE_COMMUNICATION`）决定使用哪个物理麦克风，并返回一个 `audio_io_handle_t`（输入句柄）。
+3.  **`IAudioFlinger::openRecord(...)`** (Binder Call)：
+    *   跨进程进入 `audioserver`。
+4.  **`AudioFlinger::openRecord(...)`**：
+    *   在对应的 `RecordThread` 中创建 `RecordTrack` 对象。
+    *   **分配共享内存**：创建 `AudioRecordShared`。
+    *   返回 `IAudioRecord` 接口给 Client。
+
+### 3.2 共享内存同步 (Record Proxy)
+一旦录音流建立，Native 层会初始化同步代理：
+```cpp
+// AudioRecord.cpp 内部逻辑
+mAudioRecordShared = record->getCblk();
+mDataMemory = record->getBuffers();
+
+// 🚀 初始化录音代理类 (Server 为 Producer, Client 为 Consumer)
+mProxy = new AudioRecordClientProxy(mAudioRecordShared, mDataMemory, ...);
+```
+
+---
+
+## 4. 录音数据流：反向 Proxy 模型
 
 录音的数据流向与播放正好相反，但机制相同。
 

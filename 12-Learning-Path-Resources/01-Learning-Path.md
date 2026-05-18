@@ -70,11 +70,47 @@ graph TD
 
 ---
 
-## 3. 关键建议
+## 3. 推荐阅读顺序（对应知识库模块）
+
+根据不同方向，推荐以下阅读路径：
+
+### 3.1 Android 音频开发方向
+
+```
+01-声学基础 → 02-硬件系统 → 03-DSP(编解码) → 05-Linux(ALSA/ASoC)
+→ 04-Android Audio Stack → 10-蓝牙音频 → 11-调试手册
+```
+
+### 3.2 车载音频方向
+
+```
+01-声学基础 → 02-硬件系统 → 03-DSP(ANC/空间音频) → 05-Linux(ASoC/DTS)
+→ 04-Android Audio Stack → 06-车载音频 → 07-高通平台 → 11-调试手册
+```
+
+### 3.3 蓝牙音频方向
+
+```
+01-声学基础 → 03-DSP(编解码) → 04-Android Audio Stack
+→ 10-蓝牙音频 → 11-调试手册
+```
+
+### 3.4 底层驱动方向
+
+```
+01-声学基础 → 02-硬件系统(Codec/SmartPA/接口) → 05-Linux(ALSA/ASoC/DMA/DTS)
+→ 07-高通平台(AudioReach/ADSP) → 11-调试手册
+```
+
+---
+
+## 4. 关键建议
 
 1.  **多听**：培养对音质的敏感度（什么是破音、底噪、回声）。
 2.  **多看**：阅读 AOSP 和 Linux Kernel 的音频源码。
 3.  **多动手**：买一块开发板（如 STM32, 树莓派），外接一个 Codec 跑通音频链路。
+4.  **多调试**：善用 `dumpsys`、`tinymix`、`Perfetto` 等工具（参见 [11-调试手册](../11-Audio-Debug-Cookbook/README.md)）。
+5.  **多串联**：理解全链路数据流（参见 [跨模块数据流](../11-Audio-Debug-Cookbook/02-Cross-Layer-Data-Flow.md)），避免只了解单层。
 
 ---
 *Next Topic: [音频开发资源与工具推荐](./02-Resources-Tools.md)*

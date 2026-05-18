@@ -23,7 +23,7 @@ graph TD
     subgraph App_Layer ["应用层 (Application Layer)"]
         A06[06. 车载音频 Automotive]
         A10[10. 蓝牙音频 Bluetooth Audio]
-        A09[09. 学习资源 Learning Path]
+        A12[12. 学习资源 Learning Path]
     end
 
     subgraph System_Layer ["系统层 (System Layer)"]
@@ -130,12 +130,6 @@ graph TD
 *   ITU-T 行业通信标准简介
 *   **🆕 测试工具实操: AP 自动化、PESQ/POLQA、MOS 主观评价、Python 分析脚本**
 
-### [09. 学习路径与资源 (Learning Path & Resources)](./09-Learning-Path-Resources)
-如何系统化自学及行业参考。
-*   从小白到专家的推荐书单与教程
-*   优秀的开源项目与代码库
-*   常用的音频分析工具 (Audacity, Adobe Audition 等)
-
 ### [10. 蓝牙音频 (Bluetooth Audio)](./10-Bluetooth-Audio)
 从经典蓝牙到 LE Audio 的完整技术栈。
 *   **🆕 蓝牙音频协议栈**：A2DP / HFP / LE Audio (BAP/CAP/TMAP)
@@ -152,6 +146,15 @@ graph TD
 *   **🆕 常见问题 Cookbook**：无声、爆音、延迟、功耗、路由异常诊断流程图
 *   **🆕 audioserver Crash/ANR 分析**：Tombstone 解读、死锁诊断
 
+### [12. 学习路径与资源 (Learning Path & Resources)](./12-Learning-Path-Resources)
+如何系统化自学及行业参考。
+*   从小白到专家的推荐书单与教程
+*   🆕 四大方向（Android/车载/蓝牙/驱动）推荐阅读路径
+*   🆕 分方向书单：Android/Linux/蓝牙/车载/DSP/声学
+*   优秀开源项目与代码库（WebRTC, Oboe, TinyALSA, PipeWire）
+*   常用的音频分析工具 (Audacity, REW, AP 等)
+*   🆕 音频技术大会与认证课程（AES, ELC, Bluetooth World）
+
 ---
 
 ## 🛠️ 内容编写规范 (Contribution Guidelines)
@@ -167,7 +170,7 @@ graph TD
 
 ## 🚀 如何使用本知识库 (How to Use)
 
-1.  **系统学习**：建议按照目录索引从 `01` 到 `11` 循序渐进地阅读。
+1.  **系统学习**：建议按照目录索引从 `01` 到 `12` 循序渐进地阅读，或参考 `12` 模块中的分方向阅读路径。
 2.  **按需查阅**：Android 开发者直奔 `04`；车载音频重点阅读 `02` 和 `06`；蓝牙音频请看 `10`；遇到问题直接查 `11` 调试手册。
 3.  **实践验证**：本库中包含大量 `adb` 命令和代码片段，建议配合真机或开发板进行验证。
 

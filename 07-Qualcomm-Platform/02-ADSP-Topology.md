@@ -1,73 +1,82 @@
 # 高通 ADSP 拓扑与调试 (ADSP Topology & Debugging)
 
-ADSP (Audio Digital Signal Processing) 是高通 SoC 中专门负责音频处理的处理器。了解其拓扑结构和调试方法是解决复杂音频问题的关键。
+ADSP (Audio Digital Signal Processing) 是高通 SoC 的音频大脑。本章深入探讨其内部通信协议、拓扑架构及专家级调试手段。
 
 ---
 
-## 1. ADSP 通信机制
+## 1. 通信协议深度解析：APR vs. GPR
 
-应用处理器 (AP) 与 ADSP 之间的通信依赖于专有的 RPC (Remote Procedure Call) 机制。
+AP (应用处理器) 与 DSP 之间的“通话”通过特定的数据包路由协议实现。
 
-*   **APR (Asynchronous Packet Router)**：传统架构（Elite）使用的通信协议。
-*   **GPR (Graph Packet Router)**：AudioReach 架构使用的下一代协议，支持更复杂的寻址和图形化控制。
+### 1.1 APR (Asynchronous Packet Router) - Elite 架构
+*   **路由寻址**：基于 **Service ID** 和 **Port ID**。
+*   **场景**：传统手机机型和旧版 Elite 驱动。
+
+### 1.2 GPR (Graph Packet Router) - AudioReach 架构
+*   **路由寻址**：基于 **Domain ID** 和 **Instance ID (IID)**。
+*   **灵活性**：支持动态的图 (Graph) 拓扑寻址，更适合复杂的车载多音区场景。
 
 ```mermaid
 graph LR
-    subgraph "Application Processor (AP)"
-        Driver[Qualcomm Audio Driver]
+    subgraph "AP Layer"
+        ALSA_Drv[ALSA Driver] --> IPC[Shared Memory / GLINK]
     end
     
-    subgraph "ADSP"
-        GPR_Router[GPR / APR Router]
-        Elite[Elite Service]
-        AR[AudioReach Service]
+    subgraph "ADSP Layer"
+        IPC --> Router[GPR / APR Router]
+        Router --> Service_Manager[Service Manager]
+        Service_Manager --> Modules[EQ / Mixer / Vol]
     end
-    
-    Driver -- IPC / Shared Memory --> GPR_Router
-    GPR_Router --> Elite
-    GPR_Router --> AR
 ```
 
 ---
 
-## 2. 拓扑 (Topology) 概念
+## 2. DSP 拓扑组件 (Topology Components)
 
-在 ADSP 中，“拓扑”定义了音频模块的排列组合顺序。
-*   **COPP (Common Object Processing Path)**：通常用于音频输出端（如：EQ + Volume + Reverb）。
-*   **POPP (Per Object Processing Path)**：通常用于每个播放流端（如：Decoder + Resampler）。
+理解拓扑结构是排查“无声”或“音质差”的关键。
 
----
-
-## 3. 核心调试工具链
-
-高通提供了一整套专有的调试工具：
-
-### 3.1 QACT (Qualcomm Audio Configuration Tool)
-*   **实时调试**：通过 USB 或网口连接真机，实时调整 DSP 内部模块的参数。
-*   **拓扑查看**：可视化查看当前的音频链路。
-
-### 3.2 QCAT (Qualcomm Analysis Tool)
-*   **日志分析**：用于解析高通特有的音频日志 (QXDM Logs)。
-*   **数据导出**：可以将 DSP 采集的原始 PCM 数据从日志中提取出来，用于分析 AEC 或降噪算法的效果。
-
-### 3.3 QXDM (Qualcomm eXtensible Diagnostic Monitor)
-*   **日志采集**：手机/车机音频日志采集的通用工具。
+*   **POPP (Per Object Processing Path)**：
+    *   **位置**：靠近应用端（Decoder 之后）。
+    *   **任务**：处理流特定的算法（如：不同音乐 App 的独立 EQ）。
+*   **COPP (Common Object Processing Path)**：
+    *   **位置**：混音之后，硬件输出之前。
+    *   **任务**：处理设备特定的算法（如：扬声器保护、多声道下混）。
+*   **AFE (Audio Front End)**：
+    *   **位置**：最底层。
+    *   **任务**：对接物理 I2S/TDM 接口，管理硬件采样率和时钟同步。
 
 ---
 
-## 4. 常见问题排查流程
+## 3. 专家调试实战
 
-1.  **确认路径**：使用 QACT 查看当前音频流是否正确走到了对应的 Subgraph 和 Module。
-2.  **检查时钟**：确认 BCLK/LRCK 等硬件时钟是否正常。
-3.  **日志追踪**：通过 QCAT 查看 GPR 命令是否成功下发，以及 DSP 是否有报错（Error Code）。
-4.  **PCM Dump**：在 DSP 的入口和出口 Dump 数据，定位是算法处理导致的失真还是输入源有问题。
+### 3.1 关键调试节点 (PCM Dump)
+高通 DSP 支持在路径的任何位置进行数据 Dump。
+1.  **POPP Input**：确认 App 发来的数据是否正确。
+2.  **COPP Output**：确认混音和音效处理后是否失真。
+3.  **AFE RX/TX**：确认最终送往硬件的数据状态。
+
+### 3.2 常用 adb 调试命令
+```bash
+# 查看 ADSP 是否崩溃 (SSR 状态)
+adb shell cat /sys/kernel/debug/msm_subsys/adsp
+
+# 查看音频驱动状态 (高通专有路径)
+adb shell cat /sys/kernel/debug/audio_reach/graph_info
+
+# 查看实时 DSP 负载 (需配合调试固件)
+adb shell "echo 1 > /sys/kernel/debug/audio_reach/perf_monitor"
+```
+
+---
+
+## 4. QACT 可视化连线调试
+
+使用 QACT (Qualcomm Audio Configuration Tool) 时，开发者可以直接看到当前的 **Graph 拓扑**。
+*   **实时微调**：点击 EQ 模块，拖动曲线，DSP 内部寄存器会通过 GPR 协议瞬间更新，实现“所调即所得”。
 
 ---
 
 ## 5. 关键参考 (References)
 
-1.  [Qualcomm Audio Debugging Guide](https://developer.qualcomm.com/)
-2.  *High Definition Audio on Qualcomm Platforms* - QC Whitepapers
-
----
-*Next Topic: [08. 测试与质量标准 (Testing & Standard)](../08-Testing-Quality-Standard/README.md)*
+1.  [Qualcomm Hexagon DSP SDK Documentation](https://developer.qualcomm.com/software/hexagon-dsp-sdk)
+2.  *High-Performance Audio on Qualcomm Mobile Platforms* - Industry Whitepaper

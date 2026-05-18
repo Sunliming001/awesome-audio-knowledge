@@ -1,78 +1,98 @@
 # Qualcomm AudioReach 架构深度解析
 
-AudioReach 是高通 (Qualcomm) 推出的下一代音频驱动架构。它彻底抛弃了静态拓扑，转向了基于**图形 (Graph)** 的动态管理，是目前车载和旗舰手机音频开发者的必修课。
+AudioReach（也称为 Signal Processing Framework, SPF）是高通 (Qualcomm) 推出的下一代音频信号处理架构。它不仅实现了算法的模块化，还通过一套复杂的软件中间层（PAL, AGM）实现了软硬件的高度解耦。
 
 ---
 
-## 1. 从 ELITE 到 AudioReach 的演进
+## 1. 系统全景架构 (Software Layers)
 
-*   **ELITE (Legacy)**：拓扑结构在编译时固定，修改一个模块需要重新烧录 DSP 固件。
-*   **AudioReach (Modern)**：支持动态运行时通过命令连接模块，极大地缩短了调试周期。
-
----
-
-## 2. 关键对象模型
-
-1.  **Module (模块)**：最小算法单元（如 EQ, Gain）。每个模块有唯一的 **IID (Instance ID)**。
-2.  **Container (容器)**：模块的运行载体。定义了执行频率（同步/异步）和优先级。
-3.  **Subgraph (子图)**：逻辑功能的封装（如：USB 播放流）。
-4.  **Graph (图)**：由多个 Subgraph 连接而成的完整端到端链路。
+AudioReach 的核心理解点在于高通对 TinyALSA 的扩展，将其分成了普通 TinyALSA 和 **TinyALSA Plugins** 两部分。
 
 ```mermaid
-graph LR
-    subgraph "Subgraph: Host"
-        M_Dec[Decoder] --> M_SRC[Resampler]
+graph TD
+    subgraph "High-Level OS (Android/Linux)"
+        HAL[Audio HAL]
+        PAL[PAL - Platform Audio Layer]
     end
-    subgraph "Subgraph: Device"
-        M_EQ[Equalizer] --> M_Gain[Gain Control]
+
+    subgraph "Middleware (Linux Userspace)"
+        AGM[AGM - Audio Graph Manager]
+        GSL[GSL - Graph Service Library]
     end
-    M_SRC -- Connection --> M_EQ
+
+    subgraph "Kernel Space"
+        TAP[TinyALSA Plugins]
+        ALSA[ALSA Driver - BE Only]
+    end
+
+    subgraph "DSP (Hexagon)"
+        SPF[SPF Framework]
+        APM[APM - Audio Processing Manager]
+    end
+
+    HAL --> PAL
+    PAL --> AGM
+    AGM --> GSL
+    GSL --> SPF
+    PAL -- Mixer Control --> TAP
+    TAP --> AGM
 ```
 
 ---
 
-## 3. 核心管理组件
+## 2. 关键组件详解
 
-### 3.1 APM (Audio Processing Manager)
-运行在 DSP 上的核心服务，负责解析拓扑结构，创建、连接和管理上述所有 Subgraph 和 Module。
+### 2.1 PAL (Platform Audio Layer)
+*   **职责**：提供高级 API 访问 QTI 音频硬件。
+*   **核心逻辑**：解析 `resourcemanager.xml`，管理 Front-End (FE) 设备，维护 Stream 到 GKV 的映射。
 
-### 3.2 ACDB (Audio Calibration Database)
-存储 Graph 的拓扑定义、连接关系以及每个 Module 的调试参数（Tuning Data）。开发者通过 QACT 工具生成的配置最终会写入 ACDB。
+### 2.2 AGM (Audio Graph Manager)
+*   **职责**：运行在用户空间的音频服务。
+*   **功能**：管理 FE 与 Back-End (BE) 的连接，使用 GKV 和 CKV 设置 GSL 会话，配置硬件端点（I2S, TDM）。
 
-### 3.3 GKV (Graph Key Vector)
-用于在 ACDB 中唯一标识一个 Graph 或 Subgraph 的键值对组合。系统通过比对 GKV 来加载正确的音频链路。
+### 2.3 键值对管理 (Key Vectors)
+AudioReach 使用“键值对”来描述和控制 Graph。
+*   **GKV (Graph Key Vector)**：唯一标识一个 Graph。例如 `StreamRx=Pcm_Deep_Buffer`。
+*   **CKV (Calibration Key Vector)**：模块的调试参数（如音量级别、EQ 系数）。
+*   **TKV (Tag Key Vector)**：用于运行时动态控制模块参数（如实时增益调节）。
 
----
-
-## 4. GPR (Graph Packet Router) 二进制协议
-
-所有的控制逻辑（如：调音量）都是通过 GPR 数据包下发给 DSP 的。
-
-### 3.1 数据包结构 (伪结构体)
-```c
-struct gpr_packet_t {
-    uint16_t version;
-    uint16_t header_size;
-    uint16_t src_port;
-    uint16_t dst_port; // 目标 Subgraph/Module 地址
-    uint32_t token;    // 唯一标识，用于异步回调
-    uint32_t opcode;   // 操作码 (如: APM_CMD_GRAPH_OPEN)
-    uint8_t  payload[];
-};
-```
+### 2.4 TinyALSA Plugins
+*   **翻译官**：将 ALSA 的 `mixer_ctl` 操作和 PCM 操作转换为 AGM API 调用。它使得应用层可以像操作传统声卡一样操作复杂的 DSP 图形。
 
 ---
 
-## 4. 实战：ADSP 性能监控
+## 3. 配置文件流 (XML Parsing Flow)
 
-在开发过程中，必须监控 DSP 的负载以防实时音频爆音。
+系统在开机初始化时（`pal_init`），通过 **Resource Manager** 加载三个核心 XML：
 
-*   **查看 DSP 负荷**：使用高通 `adsp_perf` 或 `qcat` 实时查看每个 Container 的 CPU 占用。
-*   **PCM Dump**：通过 GPR 命令指定 Module 开启 Dump，将数据存入 `/data/vendor/audio/` 供离线分析。
+1.  **`card-defs.xml`**：定义虚拟节点（PCMs/Mixers）设备。
+2.  **`resourcemanager.xml`**：定义设备到后端的映射、策略属性以及音频路由。
+3.  **`usecaseKvManager.xml`**：管理 Usecase 到 GKV 的映射逻辑。
 
 ---
 
-## 5. 关键参考 (References)
+## 4. DPCM：前端 (FE) 与 后端 (BE) 的革命
 
-1.  [Qualcomm AudioReach API Reference](https://developer.qualcomm.com/)
-2.  Qualcomm Hexagon DSP Architecture Whitepaper
+在旧架构（8350 以前）中，FE 和 BE 驱动都在 Kernel 中。而在 AudioReach (8450+) 中：
+*   **FE (Front-End)**：移至 **HAL/PAL 层** 虚拟化。
+*   **BE (Back-End)**：留在 **Kernel** 中，负责上电逻辑和物理接口。
+*   **优势**：极大地减小了内核音频驱动的复杂度，将逻辑转移到更易调试的用户空间。
+
+---
+
+## 5. 核心代码路径 (Expert Path)
+
+### 5.1 启动 Graph 的流程
+1.  `StreamPCM::open` -> `SessionAlsaPcm::open`。
+2.  调用 `allocateFrontEndIds` 获取虚拟 PCM 节点（如 `pcm117`）。
+3.  `PayloadBuilder` 组装 GKV/CKV 数据包。
+4.  通过 `mixer_ctl_set_array` 将 Metadata 发送给 AGM。
+5.  AGM 最终通过 GPR 协议通知 DSP 上的 APM 开启 Graph。
+
+---
+
+## 6. 关键参考 (References)
+
+1.  *SA8295 ADSP Software Architecture* - Qualcomm Documentation
+2.  *AudioReach SPF Generic Packet Router (GPR) API Reference*
+3.  Qualcomm PAL/AGM Source Code (Vendor Proprietary)

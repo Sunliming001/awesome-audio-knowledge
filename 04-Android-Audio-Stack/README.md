@@ -1,39 +1,27 @@
 # 04. Android 音频架构 (Android Audio Stack)
 
-本模块深度拆解 Android 系统中的音频全链路，从应用层 API 到 Native 服务，再到硬件抽象层。
+本模块深度拆解 Android 系统中的音频全链路。
 
 ## 📖 章节导航
 
 1.  **[Android 音频系统概览 (Overview)](./01-Overview.md)**
-    *   分层架构图：App -> Framework -> Native -> HAL -> Kernel。
-    *   各层级职责与数据流/控制流路径。
-
-2.  **[AudioTrack 深度解析](./02-AudioTrack-Deep-Dive.md)**
-    *   静态模式 (Static) 与流模式 (Stream)。
-    *   JNI 层与 Native 层 AudioTrack 的对应关系。
-    *   共享内存 (Shared Memory) 传输机制。
-
-3.  **[AudioRecord 录音流程解析](./03-AudioRecord.md)**
-    *   音频源 (AudioSource) 的选择与预处理。
-    *   录音数据流：从 HAL 到应用层的传递。
-
-4.  **[AudioFlinger 混音引擎详解](./04-AudioFlinger/README.md)**
-    *   播放线程模型：MixerThread, DirectThread, FastMixer。
-    *   混音、重采样与音效链处理。
-
-5.  **[AudioPolicy 策略管理详解](./05-AudioPolicy/README.md)**
-    *   路由决策逻辑：Usage -> Strategy -> Device。
-    *   配置文件 `audio_policy_configuration.xml` 详解。
-
-6.  **[Audio HAL 接口规范](./06-AudioHAL.md)**
-    *   HAL 演进：Legacy -> HIDL -> AIDL。
-    *   核心接口：IDevice 与 IStream。
-    *   与 AudioFlinger 的跨进程通信链路。
-
-7.  **[AudioEffect 音效框架深度解析](./07-AudioEffect.md)**
-    *   音效分类：Global, Session, Device。
-    *   EffectChain 与 EffectModule 的运行机制。
-    *   Android 14+ 的 AIDL 迁移与 Proxy 模式。
+    *   全景架构、进程隔离模型与 AAOS 特殊集成。
+2.  **[AudioService 系统管理中心](./02-AudioService.md)**
+    *   Java 层管理总管，负责音量、焦点与设备连接状态。
+3.  **[AudioTrack 播放流程解析](./03-AudioTrack.md)**
+    *   Native 初始化调用栈与共享内存同步机制。
+4.  **[AudioRecord 录音流程解析](./04-AudioRecord.md)**
+    *   音频源选择与录音数据流向。
+5.  **[AudioFlinger 混音引擎深度解析](./05-AudioFlinger.md)**
+    *   线程模型、AudioMixer 算法与初始化流程。
+6.  **[AudioPolicy 策略管理深度解析](./06-AudioPolicy.md)**
+    *   策略决策算法、XML 配置加载与路由管理。
+7.  **[Audio HAL 接口规范](./07-AudioHAL.md)**
+    *   从 HIDL 到 AIDL 的演进与 ALSA 驱动对接。
+8.  **[AudioEffect 音效框架深度解析](./08-AudioEffect.md)**
+    *   音效链加载与 Buffer 传递同步。
+9.  **[AudioFocus 音频焦点机制](./09-AudioFocus.md)**
+    *   基于协作的多应用焦点竞争管理。
 
 ---
 [返回主目录](../README.md)

@@ -47,7 +47,41 @@ graph LR
 
 ---
 
-## 3. 专家调试实战
+## 3. Multi-DSP 框架：负载均衡与低功耗
+
+高通高性能 SoC（如 SA8295）通常集成了多个 Hexagon DSP，以应对海量的并发任务。
+
+### 3.1 DSP 职责分工
+1.  **LPASS aDSP (Main)**：处理核心音频流（Music, Voice Call）、3A 算法、混音。
+2.  **mDSP (Modem DSP)**：处理 4G/5G 调制解调相关的音频编码。
+3.  **sDSP (Sensor DSP)**：处理极低功耗的任务，如 **VAD (语音活动检测)** 和 **传感器融合**。
+
+### 3.2 跨 DSP 通信
+通过 **GLINK** 或 **Shared Memory** 实现。当 sDSP 检测到人声唤醒词时，会发送信号给 aDSP，由 aDSP 启动完整的 ASR 交互链路。
+
+---
+
+## 4. TDM 接口与 Slot 映射实战
+
+在车载硬件中，SoC 与外部 Codec（如 Mercury）通常通过 TDM 8ch 或 16ch 连接。
+
+### 4.1 Slot 定义示例
+*   **Overall Format**：8 Slot / Channel, 32 BitsPerSlot, MSB Justified.
+*   **Mapping (DINs)**：
+    *   Slot 0-1：前排 MIC。
+    *   Slot 2-3：后排 MIC。
+    *   Slot 4-7：回声参考信号 (Echo Reference)。
+
+### 4.2 常见 Mixer 配置
+使用 `tinymix` 验证 TDM 状态：
+```bash
+tinymix 'QUAT_TDM_RX_0 Channels' 'Eight'
+tinymix 'QUAT_TDM_RX_0 SlotWidth' '32'
+```
+
+---
+
+## 5. 专家调试实战
 
 ### 3.1 关键调试节点 (PCM Dump)
 高通 DSP 支持在路径的任何位置进行数据 Dump。

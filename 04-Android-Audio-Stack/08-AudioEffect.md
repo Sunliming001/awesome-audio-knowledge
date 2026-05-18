@@ -47,7 +47,37 @@ graph TD
 
 ---
 
-## 3. 核心 API 与 AIDL 迁移 (Android 14+)
+## 3. Buffer 传递机制：从 Mixer 到 Effect
+
+这是音效框架中最复杂、最考验功底的部分。数据在 `PlaybackThread` 中经历了从 `AudioMixer` 到 `EffectChain` 的流转。
+
+### 3.1 Mixer Buffer 传递
+1.  **AudioMixer 独立性**：`AudioMixer` 运行在 `libaudioprocessing.so` 中，它并不关心谁调用它。
+2.  **Buffer 挂载**：在 `threadLoop` 的 `prepareTracks_l` 阶段，`PlaybackThread` 会将 `MainBuffer` 指向 `mMixerBuffer`。
+3.  **结果输出**：混音后的数据被统一存放在 `mMixerBuffer` 中。
+
+### 3.2 Effect Buffer 传递
+音效处理紧跟在混音之后。
+
+*   **链式传递**：`PlaybackThread` 遍历 `EffectChain` 集合，调用 `process_l()`。
+*   **输入输出绑定**：
+    *   **第一个音效链**：其 `mInBuffer` 通常被设置为 `mMixerBuffer`。
+    *   **中间环节**：前一个音效的输出是后一个的输入。
+    *   **最终输出**：最后一个 Chain 的 `mOutBuffer` 将作为最终结果发送给 HAL 层。
+
+```mermaid
+graph LR
+    Track1[Track 1 Data] --> Mixer[AudioMixer]
+    Track2[Track 2 Data] --> Mixer
+    Mixer -- output --> MixBuf((mMixerBuffer))
+    MixBuf -- In --> Chain1[EffectChain 1]
+    Chain1 -- Out --> Chain2[EffectChain 2]
+    Chain2 -- Final Result --> HAL[Audio HAL]
+```
+
+---
+
+## 4. 核心 API 与 AIDL 迁移 (Android 14+)
 
 ### 3.1 经典实例化 (Java)
 ```java

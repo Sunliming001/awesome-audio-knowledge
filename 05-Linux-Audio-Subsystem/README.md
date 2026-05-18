@@ -19,5 +19,10 @@
     *   PipeWire：下一代统一音视频处理标准。
     *   低延迟图模型架构与 Jack 兼容性。
 
+4.  **[ALSA 声卡注册与实例化](./04-ALSA-Card-Registration.md)**
+    *   Machine Driver 的匹配与绑定流程。
+    *   `snd_soc_bind_card` 核心函数解析。
+    *   DAI Link 的 FE 与 BE 概念。
+
 ---
 [返回主目录](../README.md)

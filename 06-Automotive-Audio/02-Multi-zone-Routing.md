@@ -17,7 +17,20 @@ AAOS 通过 **Audio Zone** 来物理隔离车内空间。
 
 ---
 
-## 2. 基于 Bus 的逻辑拓扑
+## 2. 音区管理核心 API (Zone APIs)
+
+Android 通过 `CarAudioManager` 为开发者提供了控制多音区的接口：
+
+*   **`getAudioZoneIds()`**：获取系统中所有可用的音区 ID。
+*   **`getZoneIdForUid(int uid)`**：查询特定 App 绑定到了哪个音区。
+*   **`setZoneIdForUid(int zoneId, int uid)`**：动态将某个 App 路由到指定音区。
+
+### 🚀 专家点：UID 路由原理
+系统根据发起播放请求的 **UID** 来确定数据流的归属。如果 UID 属于“后排乘员”，则 `CarAudioService` 会自动在 `audio_policy_configuration.xml` 中寻找与之绑定的 `BUS` 节点。
+
+---
+
+## 3. 基于 Bus 的逻辑拓扑
 
 不同于手机只有扬声器（Speaker）和耳机（Headset），车机拥有几十个扬声器。Android 通过 **Bus (总线地址)** 来区分用途。
 

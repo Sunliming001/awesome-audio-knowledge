@@ -1,63 +1,49 @@
 # 车载音频系统概览 (Automotive Audio System Overview)
 
-车载音频系统（Automotive Audio）已从传统的“收音机+扬声器”模式演变为复杂的**分布式多区实时交互系统**。其核心挑战在于：如何在保证驾驶安全（安全音、雷达音）的前提下，提供极致的娱乐体验（多音区、声场均衡）。
+车载音频系统已从单纯的“娱乐系统”演变为一个集成安全警报、语音交互、多音区娱乐及主动降噪的复杂分布式系统。
 
 ---
 
-## 1. 仲裁矩阵 (Arbitration Matrix)
+## 1. 以流为中心的架构 (Stream-Centric Architecture)
 
-车载音频设计的灵魂是**仲裁 (Arbitration)**。当多个声音同时请求播放时，系统必须基于优先级矩阵决定谁能发声，谁被压低（Duck），谁被静音（Mute）。
+在 AAOS 中，音频被抽象为“逻辑流”与“物理流”。
 
-### 1.2 AZID (Audio Zone ID)
-AAOS 引入了 **AZID** 来唯一标识车内物理音区。每个 AZID 拥有独立的音频焦点和路由策略，防止后排播放媒体音导致前排导航音量被意外压低。
+*   **逻辑流 (Logical Streams)**：由 App 发出，带有 `AudioAttributes` 标签（如：Music, Navigation）。
+*   **物理流 (Physical Streams)**：由 `AudioFlinger` 混音后输出到 HAL 层的特定总线 (Bus)。一旦进入物理流，原始的 Context 信息将丢失。
 
-### 1.3 CarDucking (智能压低)
-当高优先级声音（如导航）触发时，系统会自动“压低”低优先级声音（如音乐）。
-*   **策略性压低**：不同于手机的全局压低，车机支持“按区压低”。
-*   **实现**：由 `CarAudioService` 计算各总线 (Bus) 的增益系数，并下发给 HAL。
-
----
-
-## 2. 硬件与软件的边界：VHAL
-
-在 Android Automotive (AAOS) 中，`AudioControl HAL` 是连接 Android 策略与车辆底层硬件的桥梁。
-
-### 2.1 核心流程
-1.  **Android 侧**：`CarAudioService` 发起路由请求。
-2.  **HAL 侧**：执行 `IAudioControl::onDevicesToAudioPortConfig`。
-3.  **硬件侧**：外部 DSP 功放切换物理开关或调节交叉混音矩阵。
-
-```mermaid
-graph TD
-    subgraph "AAOS (Software)"
-        CAS[CarAudioService] --> APM[AudioPolicyManager]
-    end
-    
-    subgraph "HAL Layer"
-        CAS -- "ICarAudioControl" --> HAL[AudioControl HAL]
-    end
-    
-    subgraph "Vehicle Hardware"
-        HAL -- "CAN/Ethernet" --> DSP[External DSP Amp]
-        MCU[Vehicle MCU] -- "Direct I2S" --> DSP
-    end
-    
-    DSP --> SPK[Multi-channel Speakers]
-```
+### 1.1 外部音源直通 (External Sounds)
+安全音（Chimes）和警告音（Warnings）通常**不经过 Android 路由**。
+*   **原因**：为了通过安全认证（ASIL）并保证极低延迟。
+*   **实现**：由外部 MCU 直接通过 I2S 注入到 DSP 功放，或通过 HAL 层的 `createAudioPatch` 建立硬件直通。
 
 ---
 
-## 3. 车载电子架构的影响
+## 2. 仲裁矩阵与优先级 (Arbitration Matrix)
 
-*   **集中式架构**：所有音频都在机头 (Head Unit) 处理，直接输出到扬声器。
-*   **域控架构 (Domain Controller)**：机头输出数字流（如 AVB/A2B），由专用的**音频域控制器 (External Amp)** 进行全局混音和调音。
+| 优先级 | 类型 (Context) | 典型示例 | 处理策略 |
+| :--- | :--- | :--- | :--- |
+| **P0 (最高)** | EMERGENCY | 气囊弹出警告、紧急求助 | 硬件直通，强制静音一切 |
+| **P1** | SAFETY | 倒车雷达、车道偏离预警 | 压低背景音 (Ducking) |
+| **P2** | VEHICLE_STATUS | 低压警告、车门未关 | 并发播放或淡入淡出 |
+| **P3** | ANNOUNCEMENT | 交通广播、系统通知 | 抢占焦点 |
+| **P4 (最低)** | MUSIC / MEDIA | 音乐、视频、游戏 | 被随时中断 |
+
+---
+
+## 3. 车载专用功能
+
+### 3.1 车内通信 (ICC, In-Car Communication)
+解决驾驶员与后排乘客交流困难的问题。
+*   **原理**：利用麦克风阵列拾取前排声音，经过算法处理（回声消除、反馈抑制）后，通过后排扬声器实时播放。
+*   **延迟要求**：通常要求系统端到端延迟小于 **10ms**。
+
+### 3.2 语音 UI 与 Snapdragon Voice Activation (SVA)
+*   **Snapdragon Voice Activation**：高通特有的低功耗语音唤醒方案，运行在 **LPASS (Low Power Audio Subsystem)** 中。
+*   **多音区识别**：支持识别唤醒词来自哪个座位，从而定向开启对应座位的语音交互。
 
 ---
 
 ## 4. 关键参考 (References)
 
-1.  [AOSP: Automotive Audio Overview](https://source.android.com/docs/core/audio/automotive)
-2.  [Functional Safety (ISO 26262) for In-Car Infotainment](https://www.iso.org/standard/43906.html)
-
----
-*Next Topic: [车载多音区、动态路由与 Bus 绑定](./02-Multi-zone-Routing.md)*
+1.  [Qualcomm: SA8155/SA8295 Android Audio Overview](https://developer.qualcomm.com/)
+2.  [Android Automotive Audio Official Guide](https://source.android.com/devices/automotive/audio)

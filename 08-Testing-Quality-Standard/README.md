@@ -15,5 +15,12 @@
     *   会议系统认证：Microsoft Teams, Zoom Certified。
     *   标准化认证测试流程。
 
+3.  **[音频测试工具实操指南 (Testing Tools & Practice)](./03-Testing-Tools-Practice.md)**
+    *   Audio Precision 专业测试系统与自动化 API。
+    *   PESQ / POLQA 语音质量客观评估实操。
+    *   MOS 主观评价方法（P.800 / MUSHRA）。
+    *   Audacity / SoX / Python 音频分析工具链。
+    *   Android 端自动化音频测试脚本。
+
 ---
 [返回主目录](../README.md)

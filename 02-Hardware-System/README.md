@@ -24,5 +24,11 @@
     *   外部 DSP 功放与多通道系统设计。
     *   主动降噪 (ANC) 与路噪消除 (RNC) 的硬件要求。
 
+5.  **[编解码器与智能功放 (Audio Codec & SmartPA)](./05-Codec-SmartPA.md)**
+    *   Codec 功能模块与主流芯片（WCD938x、CS系列、ALC系列）。
+    *   SmartPA IV-Sense 闭环保护原理。
+    *   音质增强算法：低频补偿、热补偿、非线性校正。
+    *   Codec vs SmartPA 职责划分与驱动集成。
+
 ---
 [返回主目录](../README.md)

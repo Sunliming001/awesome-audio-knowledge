@@ -80,4 +80,4 @@ ssize_t StreamOut::write(const void* buffer, size_t bytes) {
 *   **方案 B (性能模式)**：HAL 内部调用厂商私有的 DSP 算法完成采样率转换（SRC），减轻主 CPU 负担。
 
 ---
-*下一模块：[05. Linux 音频子系统 (Linux Audio Subsystem) - 驱动级实战](../05-Linux-Audio-Subsystem/README.md)*
+*下一章：[AudioEffect 音效框架深度解析](./08-AudioEffect.md)*

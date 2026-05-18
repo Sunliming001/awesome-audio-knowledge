@@ -154,4 +154,4 @@ ssize_t AudioRecord::read(void* buffer, size_t userSize, ...) {
 3.  **多客户端冲突**：某些低端硬件不支持多个 App 同时录音。当第二个 App 尝试 `startRecording()` 时，可能会抛出异常或导致第一个 App 被强行停止。
 
 ---
-*下一章：音频心脏 [AudioFlinger 混音引擎源码深度解析](./04-AudioFlinger/README.md)*
+*下一章：[AudioFlinger 混音引擎深度解析](./05-AudioFlinger.md)*

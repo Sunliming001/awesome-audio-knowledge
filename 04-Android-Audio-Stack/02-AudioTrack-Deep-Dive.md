@@ -54,34 +54,37 @@ static jint android_media_AudioTrack_setup(JNIEnv *env, jobject thiz, ...) {
 
 ---
 
-## 3. Native 层：与 AudioFlinger 的握手
+## 3. Native 层：全链路初始化调用栈 (Expert Only)
 
-这是专家最关心的部分。在 `AudioTrack::createTrack_l` (AudioTrack.cpp) 中，会发起 Binder 调用请求 `AudioFlinger` 创建对应的后端。
+这是理解 AudioTrack 启动过程最关键的代码路径。从 `set()` 到与 `AudioFlinger` 建立连接，经历了以下核心步骤：
 
+### 3.1 核心调用栈 (Call Stack)
+1.  **`AudioTrack::set(...)`**：
+    *   校验参数（采样率、格式等）。
+    *   计算缓冲区大小。
+2.  **`AudioTrack::createTrack_l(...)`**：
+    *   **策略查询**：调用 `AudioSystem::getOutputForAttr`。此步骤会向 `AudioPolicyManager` 请求一个 `audio_io_handle_t`（输出句柄）。只有拿到这个句柄，系统才知道该往哪个 `PlaybackThread` 挂载。
+3.  **`IAudioFlinger::createTrack(...)`** (Binder Call)：
+    *   跨进程进入 `audioserver`。
+4.  **`AudioFlinger::createTrack(...)`**：
+    *   在对应的 `PlaybackThread` 中创建 `Track` 对象。
+    *   **分配内存**：创建 `AudioTrackShared` 匿名共享内存。
+    *   返回 `IAudioTrack` Binder 接口给 Client。
+
+### 3.2 建立同步机制 (Proxy Setup)
+一旦 Binder 调用返回，Client 侧会执行：
 ```cpp
-// AudioTrack.cpp 核心逻辑
-status_t AudioTrack::createTrack_l() {
-    // 通过 IAudioFlinger Binder 接口向 audioserver 发送请求
-    sp<IAudioTrack> track = audioFlinger->createTrack(input, output, &status);
-    
-    // 🚀 核心关键：获取共享内存！
-    // cblk (Control Block) 包含 write/read 指针等同步信息
-    mAudioTrackShared = track->getCblk(); 
-    // buffers 则是存放真正的音频 PCM 数据
-    mDataMemory = track->getBuffers();    
-}
-```
+// AudioTrack.cpp 内部逻辑
+mAudioTrackShared = track->getCblk(); // 获取控制块
+mDataMemory = track->getBuffers();    // 获取数据区
 
-### 🚀 匿名共享内存机制 (Anonymous Shared Memory)
-为了解决大数据量跨进程传输，Android 不直接通过 Binder 传音频数据，而是：
-1.  **AudioFlinger** 创建一块匿名共享内存（ashmem）。
-2.  通过 Binder 将该内存的 **文件描述符 (File Descriptor, fd)** 返回给 **App 进程**。
-3.  两边进程分别执行 `mmap()`，将该 fd 映射到各自的地址空间。
-4.  **零拷贝 (Zero-copy)**：App 写入数据，AudioFlinger 立即就能读取。
+// 🚀 初始化代理类
+mProxy = new AudioTrackClientProxy(mAudioTrackShared, mDataMemory, ...);
+```
 
 ---
 
-## 4. 生产者-消费者模型 (Proxy 模式)
+## 4. 匿名共享内存与零拷贝机制
 
 AudioTrack 内部维护了一个环形缓冲区。为了保证线程安全，引入了 `AudioTrackClientProxy` 和 `AudioTrackServerProxy`。
 

@@ -87,7 +87,19 @@ graph TD
 
 ---
 
-## 5. 关键参考 (References)
+## 5. 低延迟路径：AAudio 与 MMAP
+
+为了满足专业音频（如乐器仿真）的需求，Android 提供了绕过传统混音器的路径。
+
+1.  **AAudio API**：一个轻量级的 C 语言接口，旨在替代 OpenSL ES。
+2.  **MMAP (Memory Map) 模式**：
+    *   **原理**：App 直接与 Audio HAL 或 DSP 共享同一块物理内存。
+    *   **优势**：彻底绕过了 `AudioFlinger` 的软件混音延迟。
+    *   **要求**：硬件驱动必须支持 `Burst Size` 处理，且通过 ALSA 的 `mmap` 接口直接暴露。
+
+---
+
+## 6. 关键参考 (References)
 
 1.  [Android Open Source Project - Audio](https://source.android.com/devices/audio)
 2.  [Embedded Android - Karim Yaghmour](https://www.oreilly.com/library/view/embedded-android/9781449327958/)

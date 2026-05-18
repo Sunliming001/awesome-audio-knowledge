@@ -30,5 +30,10 @@
     *   核心接口：IDevice 与 IStream。
     *   与 AudioFlinger 的跨进程通信链路。
 
+7.  **[AudioEffect 音效框架深度解析](./07-AudioEffect.md)**
+    *   音效分类：Global, Session, Device。
+    *   EffectChain 与 EffectModule 的运行机制。
+    *   Android 14+ 的 AIDL 迁移与 Proxy 模式。
+
 ---
 [返回主目录](../README.md)

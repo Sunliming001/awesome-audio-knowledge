@@ -55,18 +55,43 @@ status_t AudioRecord::set(...) {
 
 录音的启动逻辑与播放对称，涉及复杂的跨进程握手。其核心调用栈如下：
 
-### 3.1 核心调用栈 (Call Stack)
+### 3.1 核心调用栈源码级解析 (Call Stack)
+
 1.  **`AudioRecord::set(...)`**：
-    *   校验采样率、通道屏蔽字等参数。
-    *   计算内部缓冲区大小（FrameCount）。
+    *   **职责**：校验录音参数，计算 FrameCount。
+    ```cpp
+    status_t AudioRecord::set(audio_source_t inputSource, uint32_t sampleRate, ...) {
+        // 关键：保存 AudioSource，这决定了后续的路由决策
+        mAttributes.source = inputSource;
+        // 随后进入创建逻辑
+        return openRecord_l(0, "");
+    }
+    ```
+
 2.  **`AudioRecord::openRecord_l(...)`**：
-    *   **策略查询**：调用 `AudioSystem::getInputForAttr`。此步骤会向 `AudioPolicyManager` 发起请求，系统会根据 `AudioSource`（如 `VOICE_COMMUNICATION`）决定使用哪个物理麦克风，并返回一个 `audio_io_handle_t`（输入句柄）。
-3.  **`IAudioFlinger::openRecord(...)`** (Binder Call)：
-    *   跨进程进入 `audioserver`。
-4.  **`AudioFlinger::openRecord(...)`**：
-    *   在对应的 `RecordThread` 中创建 `RecordTrack` 对象。
-    *   **分配共享内存**：创建 `AudioRecordShared`。
-    *   返回 `IAudioRecord` 接口给 Client。
+    *   **策略查询**：调用 `AudioSystem::getInputForAttr`。
+    ```cpp
+    status_t AudioRecord::openRecord_l(...) {
+        // 🚀 灵魂步骤：询问 Policy，我想录 VOICE_COMMUNICATION，该用哪个 Mic？
+        status = AudioSystem::getInputForAttr(&mAttributes, &input, mSessionId, ...);
+        
+        // 拿到 input 句柄后，请求 AudioFlinger 开启录音流
+        sp<IAudioRecord> record = audioFlinger->openRecord(input, ...);
+    }
+    ```
+
+3.  **`AudioFlinger::openRecord(...)`** (Server 侧执行)：
+    *   **职责**：在 `RecordThread` 中创建 `RecordTrack` 并分配共享内存。
+    ```cpp
+    sp<IAudioRecord> AudioFlinger::openRecord(...) {
+        // 找到对应的录音线程
+        RecordThread *thread = checkRecordThread_l(input);
+        // 创建 RecordTrack，这是数据的生产者
+        recordTrack = thread->createRecordTrack_l(client, ...);
+        // 返回 Binder 句柄
+        return new RecordHandle(recordTrack);
+    }
+    ```
 
 ### 3.2 共享内存同步 (Record Proxy)
 一旦录音流建立，Native 层会初始化同步代理：

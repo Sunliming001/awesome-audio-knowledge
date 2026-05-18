@@ -58,18 +58,45 @@ static jint android_media_AudioTrack_setup(JNIEnv *env, jobject thiz, ...) {
 
 这是理解 AudioTrack 启动过程最关键的代码路径。从 `set()` 到与 `AudioFlinger` 建立连接，经历了以下核心步骤：
 
-### 3.1 核心调用栈 (Call Stack)
+### 3.1 核心调用栈源码级解析 (Call Stack)
+
 1.  **`AudioTrack::set(...)`**：
-    *   校验参数（采样率、格式等）。
-    *   计算缓冲区大小。
+    *   **职责**：校验参数（采样率、格式等），计算 `frameCount`。
+    ```cpp
+    status_t AudioTrack::set(audio_stream_type_t streamType, uint32_t sampleRate, ...) {
+        // 校验采样率与格式
+        if (!audio_is_valid_format(format)) return BAD_VALUE;
+        // 计算每一帧的大小 (channels * bytes_per_sample)
+        mFrameSize = audio_bytes_per_sample(format) * channelCount;
+        // 随后进入关键的创建流程
+        return createTrack_l();
+    }
+    ```
+
 2.  **`AudioTrack::createTrack_l(...)`**：
-    *   **策略查询**：调用 `AudioSystem::getOutputForAttr`。此步骤会向 `AudioPolicyManager` 请求一个 `audio_io_handle_t`（输出句柄）。只有拿到这个句柄，系统才知道该往哪个 `PlaybackThread` 挂载。
-3.  **`IAudioFlinger::createTrack(...)`** (Binder Call)：
-    *   跨进程进入 `audioserver`。
-4.  **`AudioFlinger::createTrack(...)`**：
-    *   在对应的 `PlaybackThread` 中创建 `Track` 对象。
-    *   **分配内存**：创建 `AudioTrackShared` 匿名共享内存。
-    *   返回 `IAudioTrack` Binder 接口给 Client。
+    *   **策略查询**：调用 `AudioSystem::getOutputForAttr`。此步骤会向 `AudioPolicyManager` 请求一个 `audio_io_handle_t`（输出句柄）。
+    ```cpp
+    status_t AudioTrack::createTrack_l() {
+        // 🚀 灵魂步骤：询问 Policy 大脑，我该去哪个输出线程？
+        status = AudioSystem::getOutputForAttr(&mAttributes, &output, mSessionId, ...);
+        
+        // 拿到 output 句柄后，发起跨进程 Binder 调用
+        sp<IAudioTrack> track = audioFlinger->createTrack(input, output, &status);
+    }
+    ```
+
+3.  **`AudioFlinger::createTrack(...)`** (Server 侧执行)：
+    *   **分配资源**：在对应的 `PlaybackThread` 中创建 `Track` 对象并分配匿名共享内存。
+    ```cpp
+    sp<IAudioTrack> AudioFlinger::createTrack(...) {
+        // 找到对应的线程 (MixerThread / DirectThread)
+        PlaybackThread *thread = checkPlaybackThread_l(output);
+        // 创建 Track 实例，内部会分配 ashmem
+        track = thread->createTrack_l(client, streamType, ...);
+        // 返回 Binder 接口给 Client
+        return new TrackHandle(track);
+    }
+    ```
 
 ### 3.2 建立同步机制 (Proxy Setup)
 一旦 Binder 调用返回，Client 侧会执行：

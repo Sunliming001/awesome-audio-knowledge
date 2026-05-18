@@ -19,5 +19,18 @@
     *   语音活动检测 (VAD) 的意义。
     *   车载多音区识别与离线化要求。
 
+4.  **[空间音频 (Spatial Audio)](./04-Spatial-Audio.md)**
+    *   人类空间听觉原理：ITD、ILD 与耳廓效应。
+    *   HRTF 渲染与个性化方案。
+    *   Ambisonics 球谐函数声场编码。
+    *   商业方案：Dolby Atmos、Apple Spatial Audio、Sony 360RA。
+    *   头部追踪与车载空间音频。
+
+5.  **[音频编解码格式 (Audio Codec Formats)](./05-Audio-Codec-Formats.md)**
+    *   通用格式：AAC、Opus、FLAC、MP3。
+    *   蓝牙格式：SBC、aptX、LDAC、LC3 (LE Audio)。
+    *   语音通信：AMR-WB、EVS、Opus。
+    *   沉浸式：Dolby AC-4、MPEG-H、IAMF。
+
 ---
 [返回主目录](../README.md)

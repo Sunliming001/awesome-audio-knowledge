@@ -23,5 +23,14 @@
     *   Codec DAPM 电源管理优化。
     *   功耗调试命令速查与常见问题诊断。
 
+4.  **[音频稳定性分析 (Stability Analysis)](./04-Stability-Analysis.md)**
+    *   稳定性基础：信号 (SIGSEGV/SIGABRT)、Tombstone 结构、addr2line 解读。
+    *   audioserver Crash：Top 10 场景、分析三步法、调试命令。
+    *   Audio HAL Crash：HAL 进程模型、常见 Crash 模式。
+    *   ADSP SSR：子系统重启机制、Crash 原因、恢复全链路。
+    *   ANR 分析：音频相关 ANR 场景与死锁诊断。
+    *   内存问题：UAF / Overflow / Leak、ASan / MTE 调试工具。
+    *   稳定性防护：编码防御最佳实践与监控清单。
+
 ---
 [返回主目录](../README.md)

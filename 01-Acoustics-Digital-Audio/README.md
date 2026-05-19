@@ -20,5 +20,12 @@
     *   位深、动态范围、量化噪声与抖动。
     *   PCM 数据格式详解。
 
+4.  **[音频软件核心概念 (Audio Software Core Concepts)](./04-Audio-Software-Concepts.md)**
+    *   七大核心量：Sample Rate / Bit Depth / Channel / Format / Frame / Buffer Size / Latency。
+    *   Frame vs Sample 的区别与常见混淆。
+    *   Buffer / Period / Period Count 的关系与代码示例。
+    *   延迟组成拆解与获取方法。
+    *   完整公式速查表与常见陷阱 FAQ。
+
 ---
 [返回主目录](../README.md)

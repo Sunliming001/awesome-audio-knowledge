@@ -74,6 +74,7 @@ graph TD
 *   声波物理特性 (Sound Wave Physics)
 *   心理声学 (Psychoacoustics)
 *   数字音频基础 (ADC/DAC 原理, 采样率, 位深, PCM)
+*   音频软件核心概念：Frame / Sample / Buffer / Period / Latency 与代码实例
 
 ### [02. 硬件系统 (Hardware System)](./02-Hardware-System)
 涵盖手机、车载、工业音频硬件拓扑。
@@ -148,6 +149,7 @@ graph TD
 *   常见问题 Cookbook：无声、爆音、延迟、功耗、路由异常诊断流程图
 *   audioserver Crash/ANR 分析：Tombstone 解读、死锁诊断
 *   音频功耗优化：Offload 卸载、AP Suspend、LPI 低功耗岛、DAPM 电源管理
+*   音频稳定性分析：Native Crash / ADSP SSR / ANR / 内存问题 / 防护最佳实践
 
 ### [11. 学习路径与资源 (Learning Path & Resources)](./11-Learning-Path-Resources)
 如何系统化自学及行业参考。

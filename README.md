@@ -134,6 +134,7 @@ graph TD
 *   常用测试仪器 with 方法 (Audio Precision 等)
 *   ITU-T 行业通信标准简介
 *   测试工具实操: AP 自动化、PESQ/POLQA、MOS 主观评价、Python 分析脚本
+*   Android CTS/VTS 音频测试: 高频失败用例解析、自动化框架、CI 集成、压力测试
 
 ### [09. 蓝牙音频 (Bluetooth Audio)](./09-Bluetooth-Audio)
 从经典蓝牙到 LE Audio 的完整技术栈。
@@ -142,6 +143,7 @@ graph TD
 *   Auracast 广播音频与 Isochronous Channels 传输机制
 *   Android BT Audio HAL：AIDL 接口、A2DP 数据通路、LE Audio 集成
 *   蓝牙音频调试：btsnoop HCI log 分析、codec 协商诊断
+*   LE Audio 专题: LC3/LC3plus 编解码、CIS/BIS 等时通道、Auracast、TWS CSIP
 
 ### [10. 音频调试手册 (Audio Debug Cookbook)](./10-Audio-Debug-Cookbook)
 全链路音频调试的系统方法论与实战 Cookbook。
@@ -161,6 +163,10 @@ graph TD
 *   优秀开源项目与代码库（WebRTC, Oboe, TinyALSA, PipeWire）
 *   常用的音频分析工具 (Audacity, REW, AP 等)
 *   音频技术大会与认证课程（AES, ELC, Bluetooth World）
+*   面试高频知识点 Top 20、Android 音频调试命令速查手册、Python 分析脚本集
+
+### [📖 音频术语表 (Glossary)](./Glossary.md)
+100+ 核心缩写与术语索引，按字母顺序排列，快速查阅。
 
 ---
 

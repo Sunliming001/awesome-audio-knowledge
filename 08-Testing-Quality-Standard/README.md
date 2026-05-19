@@ -22,5 +22,11 @@
     *   Audacity / SoX / Python 音频分析工具链。
     *   Android 端自动化音频测试脚本。
 
+4.  **[Android CTS/VTS 与自动化测试 (CTS/VTS & Automation)](./04-CTS-VTS-Automation.md)**
+    *   CTS 音频测试模块与高频失败用例解析。
+    *   VTS Audio HAL 测试：IStreamOut/IStreamIn/IEffect。
+    *   Python 自动化测试框架搭建与 CI 集成。
+    *   音频压力测试脚本（并发流、路由切换、资源泄漏）。
+
 ---
 [返回主目录](../README.md)

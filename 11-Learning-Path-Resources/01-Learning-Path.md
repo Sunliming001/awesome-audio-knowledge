@@ -221,7 +221,75 @@ Linux Kernel       ☆       ★       ★★       ☆       ☆
 
 ---
 
-## 5. 关键建议
+## 5. 面试高频知识点
+
+```
+音频工程师面试 Top 20 高频问题 (按方向):
+
+  === Android 音频 ===
+  1. AudioFlinger 的线程模型有哪些？各自用途？
+  2. AudioPolicy 路由决策流程 (Usage → Strategy → Device)？
+  3. AudioTrack 的共享内存机制如何工作？
+  4. FastTrack 和 NormalTrack 的区别与准入条件？
+  5. Audio HAL 从 HIDL 到 AIDL 的演进动机？
+  6. AudioFocus 的四种类型和 Duck 行为？
+  
+  === Linux 驱动 ===
+  7. ASoC 三驾马车 (Codec/Platform/Machine) 各自职责？
+  8. DAPM Widget 和 Route 的工作原理？
+  9. snd_soc_bind_card() 做了什么？
+  10. DPCM 中 FE 和 BE 的区别？
+  
+  === DSP / 算法 ===
+  11. AEC 回声消除的基本原理 (LMS/NLMS)？
+  12. HRTF 是什么？如何用于空间音频渲染？
+  13. Opus 和 AAC 的适用场景差异？
+  14. SmartPA IV-Sense 保护的原理？
+  
+  === 硬件 ===
+  15. I2S 的四种格式和 Master/Slave 配置？
+  16. PDM 和 PCM 的区别？Decimation 是什么？
+  17. SoundWire 相比 I2S 的优势？
+  
+  === 调试 ===
+  18. Android 音频无声问题的排查思路？
+  19. 如何定位 Underrun/Overrun 问题？
+  20. 蓝牙音频卡顿如何分析？
+```
+
+---
+
+## 6. 学习资源推荐书单
+
+```
+按阶段推荐的经典书籍:
+
+  Phase 1 (入门):
+    📕 《声学基础》- 杜功焕 (中文经典教材)
+    📕 "Audio Engineering 101" - Tim Dittmar
+    📕 "Digital Audio Signal Processing" - Udo Zölzer
+    
+  Phase 2 (进阶):
+    📗 "Understanding Digital Signal Processing" - Richard Lyons
+    📗 "DAFX: Digital Audio Effects" - Udo Zölzer
+    📗 "The Scientist and Engineer's Guide to DSP" - Steven Smith (免费在线)
+    
+  Phase 3 (专业):
+    📘 "Linux Device Drivers" - Jonathan Corbet (LDD3)
+    📘 "Embedded Android" - Karim Yaghmour
+    📘 "Android Internals" - Jonathan Levin
+    📘 AOSP Source Code (最好的参考资料)
+    
+  Phase 4 (专家):
+    📙 "Adaptive Filter Theory" - Simon Haykin (自适应滤波)
+    📙 "Speech Enhancement" - Jacob Benesty (语音增强)
+    📙 "3D Audio" - Rozenn Nicol (空间音频)
+    📙 "Active Noise Control Systems" - Kuo & Morgan (ANC)
+```
+
+---
+
+## 7. 关键建议
 
 1.  **多听**：培养对音质的敏感度（什么是破音、底噪、回声、混响过长）。
 2.  **多看源码**：阅读 AOSP `audioserver`、Linux Kernel `sound/soc/` 目录下的代码。

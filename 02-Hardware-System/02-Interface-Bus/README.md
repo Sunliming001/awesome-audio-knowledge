@@ -1,67 +1,47 @@
 # 数字音频接口与总线 (Digital Audio Interfaces & Bus)
 
-在音频 SoC 设计中，芯片间的数据交换（Inter-IC Communication）主要依赖以下几种串行总线。
+在音频 SoC 设计中，芯片间的数据交换（Inter-IC Communication）主要依赖以下几种串行总线。本模块拆分为四个独立章节深入讲解。
 
 ---
 
-## 1. I2S (Inter-IC Sound) 详解
+## 章节导航
 
-I2S 是音频领域的行业标准。除了飞利浦定义的标准协议，实际工程中还有多种对齐格式。
+1. **[I2S 总线详解 (Inter-IC Sound)](./01-I2S.md)**
+   * 信号线定义（BCLK / LRCLK / SD / MCLK）与时钟关系。
+   * 四种数据对齐格式（Standard / Left-J / Right-J / DSP Mode）。
+   * 主从模式与 Linux ASoC `dai_fmt` 配置。
+   * 常见 I2S 问题调试（无声、变调、声道反转）。
 
-### 1.1 常见的四种格式
-1.  **I2S Phillips Standard**：MSB 在 LRCK 翻转后的第 2 个 BCLK 上升沿开始。
-2.  **Left Justified (左对齐)**：MSB 在 LRCK 翻转后的第 1 个 BCLK 上升沿立即开始。
-3.  **Right Justified (右对齐/EIAJ)**：数据在 LRCK 翻转前对齐，常用于部分旧式 DAC。
-4.  **DSP / PCM Mode**：LRCK 变成一个单周期的脉冲，后面连续跟多个声道的数据。
+2. **[TDM 时分复用 (Time Division Multiplexing)](./02-TDM.md)**
+   * Slot / Frame 结构与 BCLK 计算公式。
+   * Slot Mapping 通道映射与 bitmask。
+   * 高通平台 TDM 配置（Machine Driver + Device Tree）。
+   * 常见 TDM 问题排查。
 
-### 1.2 主从模式 (Master vs Slave)
-*   **Master**：提供 BCLK 和 LRCK 的芯片。
-*   **Slave**：接收时钟并根据其节拍发送/接收数据。
-*   *经验*：系统设计中通常由 SoC 作为 Master，Codec 作为 Slave。
+3. **[PDM 脉冲密度调制 (Pulse Density Modulation)](./03-PDM.md)**
+   * Sigma-Delta 调制原理与 Noise Shaping。
+   * 一线双麦（上升沿/下降沿复用）。
+   * SoC 侧抽取处理链（CIC → 补偿 FIR → HPF）。
+   * DMIC Device Tree 配置与调试命令。
 
----
-
-## 2. TDM (Time Division Multiplexing)
-
-当需要在一个物理引脚上传输多于 2 个声道（如车机 8 声道、12 声道）时，TDM 是唯一选择。
-
-### 2.1 槽位 (Slot) 与宽度
-*   一个 TDM 帧包含多个 Slot。
-*   **Slot Width**：通常为 32-bit，但实际 Data 可能是 16-bit 或 24-bit。
-*   **Bitclock 计算**：$BCLK = \text{SampleRate} \times \text{Slots} \times \text{SlotWidth}$。
-    *   *例*：48kHz, 8ch, 32bit -> $48000 \times 8 \times 32 = 12.288 \text{ MHz}$。
-
----
-
-## 3. PDM (Pulse Density Modulation)
-
-PDM 是数字 MEMS 麦克风的标配接口。
-
-### 3.1 调制原理
-PDM 不传量化值，而是以极高的采样率（如 3.072MHz）传输 1 位码流。
-*   **密度 -> 振幅**：1 的密度越高，代表模拟波形幅度越大。
-
-### 3.2 SoC 侧的“抽取”处理 (Decimation)
-SoC 接收到 PDM 信号后不能直接混音，必须经过：
-1.  **CIC 滤波器**：降低采样率（抽取）。
-2.  **补偿滤波器**：修正频响。
-3.  **高通滤波器**：滤除直流分量。
-*最终转化为 16/24-bit 的 PCM 信号。*
+4. **[SoundWire 总线](./04-SoundWire.md)**
+   * SoundWire vs I2S/SLIMbus/PDM 全面对比。
+   * 2 线物理层与双向 DDR 传输。
+   * 设备自动枚举、寄存器访问（替代 I2C）。
+   * Clock Stop 电源管理机制。
+   * Linux SoundWire 驱动架构与调试。
 
 ---
 
-## 4. 新一代总线：SoundWire
+## 接口选型速查
 
-MIPI 联盟推出的 SoundWire 旨在替代 I2S 和 PDM。
-*   **优势**：支持在同一总线上挂载多个麦克风和扬声器，支持控制命令与数据并发，支持动态电源管理。
-
----
-
-## 5. 关键参考 (References)
-
-1.  *I2S Bus Specification* - Philips
-2.  [Understanding Digital Audio Interfaces - TI](https://www.ti.com/lit/an/slaa701/slaa701.pdf)
-3.  [MIPI SoundWire Specification](https://www.mipi.org/specifications/soundwire)
+| 场景 | 推荐接口 | 说明 |
+|:---|:---|:---|
+| SoC ↔ Codec (2ch) | I2S | 最简单、最通用 |
+| SoC ↔ 外部 DSP (多ch) | TDM | 单线多通道 |
+| SoC ↔ DMIC | PDM | 2 线支持双麦 |
+| SoC ↔ Codec + SmartPA | SoundWire | 数据+控制+电源管理一线搞定 |
+| 车载 SoC ↔ 远端节点 | A2B | 长距离、菊花链 (见 [车载硬件](../04-Automotive-Hardware.md)) |
 
 ---
-*Next Topic: [移动端与车载音频硬件架构 (Mobile & Automotive Audio Hardware)](../03-Mobile-Hardware.md)*
+[返回硬件系统](../README.md) | [返回主目录](../../README.md)

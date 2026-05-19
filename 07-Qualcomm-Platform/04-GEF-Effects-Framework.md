@@ -221,9 +221,150 @@ Filter: MSG_SSID_QDSP6 + "gef" 或 "set_param"
 
 ---
 
-## 8. 关键参考 (References)
+## 8. GEF 与 Android AudioEffect 的关系
+
+```
+Android AudioEffect vs GEF 的定位:
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ Android AudioEffect Framework (Java/Native)                │
+  │   → 标准 API: Equalizer, BassBoost, Virtualizer, ...      │
+  │   → 工作在 AudioFlinger 层 (ARM 侧)                       │
+  │   → 每个 AudioSession 可挂载不同 Effect                    │
+  │   → 适用: App 级音效控制                                   │
+  └─────────────────────────────────────────────────────────────┘
+           │ 只能控制 ARM 侧 Effect
+           │ 无法触及 ADSP 内部模块参数
+           ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │ GEF (Generic Effects Framework)                            │
+  │   → 直接操作 ADSP SPF Graph 中的模块                       │
+  │   → 绕过 AudioFlinger                                     │
+  │   → 适用: 系统级音效、硬件级调参、OEM 定制                 │
+  │   → 可做到 AudioEffect 做不到的事:                        │
+  │       - 控制 ADSP 内部 EQ/DRC 参数                        │
+  │       - 修改 Speaker Protection 阈值                       │
+  │       - 切换不同 use case 的算法参数                       │
+  │       - 持久化参数 (设备重启后保持)                        │
+  └─────────────────────────────────────────────────────────────┘
+  
+  协作方式:
+    App → AudioEffect API → Equalizer Effect → AudioFlinger 层处理
+    OEM → GEF API → 直接下发参数到 ADSP Module → 硬件级处理
+    
+    两者可以共存: App 控制的 EQ 和 GEF 控制的 ADSP EQ 串联
+```
+
+---
+
+## 9. GEF 参数调试全流程
+
+### 9.1 端到端调试步骤
+
+```bash
+# Step 1: 确认 ADSP Graph 已启动
+adb shell cat /proc/asound/card0/agm_dump
+# 查看当前活跃的 Use Case 和 Graph
+
+# Step 2: 查看 GEF 可配置的 Module 列表
+adb shell dumpsys vendor.audio.effects | grep -i gef
+# 或者通过 QXDM 过滤:
+#   MSG_SSID_QDSP6 + "gef" → 看到 Module 注册列表
+
+# Step 3: 使用 GEF API 设置参数 (通过 test app)
+# GEF test tool (OEM 提供):
+gef_test set_param \
+    --module_id 0x10001234 \
+    --param_id 0x10001235 \
+    --payload "01 00 00 00 ..."  # 二进制参数
+
+# Step 4: 验证参数已到达 ADSP
+# QXDM 日志:
+#   "GEF: set_param module=0x10001234 param=0x10001235 size=20 SUCCESS"
+# 或:
+adb shell cat /sys/kernel/debug/aud_dev/gef_status
+
+# Step 5: 验证音频效果
+# 用 Audio Precision 或 REW 测量频响变化
+# 播放正弦扫频 → 录音 → 对比 EQ 前后频响
+
+# Step 6: 持久化参数
+gef_test persist \
+    --module_id 0x10001234 \
+    --usecase "PLAYBACK_SPEAKER"
+# 参数保存到 /data/vendor/audio/gef_persist/
+# 下次启动自动加载
+```
+
+### 9.2 GEF 参数格式
+
+```
+GEF 参数的二进制格式:
+
+  ┌────────────────────────────────────────┐
+  │ Param Header (8 bytes)                │
+  │   Module Instance ID : uint32_t       │
+  │   Param ID           : uint32_t       │
+  ├────────────────────────────────────────┤
+  │ Param Payload (variable length)       │
+  │   具体格式由 Module 定义              │
+  │                                        │
+  │   例: 5-band PEQ 参数                 │
+  │     num_bands      : uint32_t = 5     │
+  │     band[0].type   : uint32_t (Peak)  │
+  │     band[0].freq   : uint32_t (100Hz) │
+  │     band[0].gain   : int32_t (-3dB)   │
+  │     band[0].Q      : uint32_t (Q=1.0) │
+  │     band[1]...                         │
+  └────────────────────────────────────────┘
+  
+  注意:
+    - 所有值使用 Little-Endian
+    - 增益通常用 Q27 或 Q28 定点数表示
+    - 频率单位: Hz (uint32_t)
+    - Q 值: Q8 定点数 (如 Q=1.0 → 0x100)
+```
+
+---
+
+## 10. GEF 与 ACDB/QACT 的配合
+
+```
+GEF / ACDB / QACT 三者关系:
+
+  QACT (调参工具, PC 端)
+    │
+    │ 导出
+    ▼
+  ACDB (Audio Calibration Database)
+    │ → 存储默认参数 (出厂配置)
+    │ → 每个 <Device, Topology, UseCase> 组合一套参数
+    │ → 文件: /vendor/etc/acdbdata/*.acdb
+    │
+    │ 启动时加载
+    ▼
+  ADSP SPF Module ← 默认参数
+    │
+    │ 运行时覆盖
+    ▼
+  GEF Set Param
+    │ → 在 ACDB 默认值之上动态修改
+    │ → 优先级: GEF > ACDB
+    │ → 可选: 持久化到文件系统
+    
+  典型工作流:
+    1. 硬件调试阶段: QACT 反复调参 → 导出 ACDB
+    2. 量产阶段: ACDB 固化到 /vendor 分区
+    3. 运行时定制: GEF 动态修改特定参数 (如用户自定义 EQ)
+    4. OTA 升级: 更新 ACDB 文件, GEF persist 参数保留
+```
+
+---
+
+## 11. 关键参考 (References)
 
 1.  80-VN500-24: *Generic Effects Framework (GEF) for AudioReach*
 2.  80-VN500-11: *AudioReach LA Customizations*
 3.  80-VN500-13: *AudioReach Use Case Customizations*
 4.  80-VN500-4: *AudioReach SPF Modules API Reference*
+5.  80-VN500-1: *AudioReach Architecture Overview*

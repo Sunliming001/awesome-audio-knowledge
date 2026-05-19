@@ -201,4 +201,172 @@ freqs = np.fft.rfftfreq(len(data), 1/fs)
 | **Qualcomm 合作伙伴培训** | 认证 | 高通音频平台 | 需合作伙伴资质 |
 
 ---
+
+## 7. Android 音频调试速查手册
+
+```bash
+# =====================================================================
+# Android 音频调试完整命令速查 (收藏即用)
+# =====================================================================
+
+# ==================== 1. 全局状态 ====================
+adb shell dumpsys media.audio_flinger   # AudioFlinger 全状态
+adb shell dumpsys media.audio_policy    # AudioPolicy 全状态
+adb shell dumpsys audio                 # AudioService 全状态
+
+# ==================== 2. 播放问题 ====================
+# 当前活跃 Track
+adb shell dumpsys media.audio_flinger | grep -B2 -A15 "ACTIVE"
+# Output Thread 状态
+adb shell dumpsys media.audio_flinger | grep -A20 "Output thread"
+# Underrun 计数
+adb shell dumpsys media.audio_flinger | grep -i "underrun"
+
+# ==================== 3. 录音问题 ====================
+# 活跃 Input Thread
+adb shell dumpsys media.audio_flinger | grep -A15 "Input thread"
+# 谁在录音 (App PID)
+adb shell dumpsys media.audio_flinger | grep -i "RecordTrack"
+
+# ==================== 4. 路由问题 ====================
+# 当前路由设备
+adb shell dumpsys media.audio_policy | grep "Selected"
+adb shell dumpsys media.audio_policy | grep "output device"
+# 设备连接状态
+adb shell dumpsys media.audio_policy | grep -i "connect"
+# AudioPatch
+adb shell dumpsys media.audio_policy | grep -i "patch"
+
+# ==================== 5. 音量问题 ====================
+adb shell dumpsys audio | grep -A3 "Stream volumes"
+# 设置音量 (stream 3=MUSIC, range 0-15)
+adb shell media volume --stream 3 --set 10
+
+# ==================== 6. 音效问题 ====================
+adb shell dumpsys media.audio_flinger | grep -i "effect"
+# 列出所有已注册音效
+adb shell dumpsys audio | grep -A2 "Effects"
+
+# ==================== 7. 蓝牙音频 ====================
+adb shell dumpsys bluetooth_manager | grep -iE "a2dp|codec|le.audio"
+adb shell dumpsys bluetooth_manager | grep -i "state"
+
+# ==================== 8. USB 音频 ====================
+adb shell cat /proc/asound/cards
+adb shell cat /proc/asound/card*/stream*
+adb shell dumpsys usb | grep -i audio
+
+# ==================== 9. 高通平台 ====================
+adb shell tinymix -D 0                 # 列出所有 Mixer Controls
+adb shell tinymix -D 0 'Volume'        # 读取指定 Control
+adb shell cat /proc/asound/card0/agm_dump   # AGM Graph Dump
+adb shell cat /sys/kernel/debug/regmap/wcd938x-codec/registers
+
+# ==================== 10. PCM 抓取 ====================
+# 录音
+adb shell tinycap /data/local/tmp/cap.wav -D 0 -d 0 -c 2 -r 48000 -b 16 -T 5
+# 播放
+adb shell tinyplay /data/local/tmp/test.wav -D 0 -d 0
+# HAL dump (开启/关闭)
+adb shell setprop vendor.audio.hal.dump 1
+adb shell setprop vendor.audio.hal.dump 0
+adb pull /data/vendor/audio/
+
+# ==================== 11. 实时日志 ====================
+# 音频相关 logcat
+adb logcat -s AudioFlinger AudioPolicyManager AudioPolicyService \
+    AudioTrack AudioRecord AudioService AudioHAL
+# 高通音频
+adb logcat -s audio_hw_primary audio_hw_utils PAL AGM
+```
+
+---
+
+## 8. 常用 Python 音频分析脚本集
+
+```python
+#!/usr/bin/env python3
+"""音频工程师常用 Python 分析脚本集"""
+
+import numpy as np
+from scipy import signal
+from scipy.io import wavfile
+
+# ==================== 1. THD+N 计算 ====================
+def calc_thd_n(data, fs, fundamental_freq, num_harmonics=5):
+    """计算总谐波失真+噪声 (THD+N)"""
+    N = len(data)
+    fft = np.fft.rfft(data * np.hanning(N))
+    freqs = np.fft.rfftfreq(N, 1/fs)
+    mag = np.abs(fft)
+    
+    # 找基频峰值
+    fund_idx = np.argmin(np.abs(freqs - fundamental_freq))
+    fund_power = mag[fund_idx]**2
+    
+    # 找谐波
+    harmonic_power = 0
+    for h in range(2, num_harmonics + 1):
+        h_idx = np.argmin(np.abs(freqs - fundamental_freq * h))
+        harmonic_power += mag[h_idx]**2
+    
+    # 噪声 = 总功率 - 基频功率
+    total_power = np.sum(mag**2)
+    noise_power = total_power - fund_power
+    
+    thd = np.sqrt(harmonic_power / fund_power) * 100  # %
+    thd_n = np.sqrt(noise_power / fund_power) * 100   # %
+    return thd, thd_n
+
+# ==================== 2. 频响测量 ====================
+def measure_frequency_response(ref_file, dut_file):
+    """通过参考信号和DUT录音计算频响"""
+    fs_ref, ref = wavfile.read(ref_file)
+    fs_dut, dut = wavfile.read(dut_file)
+    assert fs_ref == fs_dut, "采样率不匹配"
+    
+    # 互功率谱 / 自功率谱 = 传递函数
+    f, Pxy = signal.csd(ref.astype(float), dut.astype(float), 
+                         fs_ref, nperseg=4096)
+    f, Pxx = signal.welch(ref.astype(float), fs_ref, nperseg=4096)
+    H = Pxy / Pxx
+    
+    magnitude_db = 20 * np.log10(np.abs(H))
+    phase_deg = np.angle(H, deg=True)
+    return f, magnitude_db, phase_deg
+
+# ==================== 3. A 计权 ====================
+def a_weighting(fs, N):
+    """生成 A 计权滤波器系数"""
+    # IEC 61672 A-weighting curve
+    f1 = 20.598997
+    f2 = 107.65265
+    f3 = 737.86223
+    f4 = 12194.217
+    
+    # 设计 A 计权的模拟原型, 然后双线性变换
+    nums = [(2*np.pi*f4)**2 * (10**(2.0/20)), 0, 0, 0, 0]
+    dens = np.polymul([1, 4*np.pi*f4, (2*np.pi*f4)**2],
+                       [1, 4*np.pi*f1, (2*np.pi*f1)**2])
+    dens = np.polymul(np.polymul(dens, [1, 2*np.pi*f3]),
+                       [1, 2*np.pi*f2])
+    b, a = signal.bilinear(nums, dens, fs)
+    return b, a
+
+# ==================== 4. 延迟测量 ====================
+def measure_latency(ref_signal, recorded_signal, fs):
+    """通过互相关测量音频延迟"""
+    corr = np.correlate(recorded_signal.astype(float),
+                        ref_signal.astype(float), mode='full')
+    delay_samples = np.argmax(corr) - len(ref_signal) + 1
+    delay_ms = delay_samples / fs * 1000
+    return delay_ms
+
+# 使用示例:
+# fs, data = wavfile.read("1khz_tone.wav")
+# thd, thd_n = calc_thd_n(data, fs, 1000)
+# print(f"THD: {thd:.3f}%, THD+N: {thd_n:.3f}%")
+```
+
+---
 [返回主目录](../README.md)

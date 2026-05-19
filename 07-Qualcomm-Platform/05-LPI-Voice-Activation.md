@@ -257,10 +257,153 @@ adb shell dumpsys soundtrigger_middleware
 
 ---
 
-## 9. 关键参考 (References)
+## 9. Android SoundTrigger HAL 集成
+
+```
+高通 LPI 与 Android SoundTrigger HAL 的集成:
+
+  ┌─────────────────────────────────────────────────────────┐
+  │ App 层                                                  │
+  │   VoiceInteractionService / SoundTrigger API            │
+  │   → loadSoundModel(keyphrase_model)                    │
+  │   → startRecognition(config)                            │
+  └─────────────────────────────────────────────────────────┘
+           │
+           ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │ Framework 层                                            │
+  │   SoundTriggerMiddlewareService                        │
+  │   → 管理 Model 加载/卸载                               │
+  │   → 接收识别事件回调                                    │
+  └─────────────────────────────────────────────────────────┘
+           │ AIDL
+           ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │ HAL 层                                                  │
+  │   ISoundTriggerHw (AIDL HAL)                           │
+  │   → loadSoundModel() → 将模型写入 ADSP                 │
+  │   → startRecognition() → 启动 LPI Graph                │
+  │   → recognitionCallback() → 唤醒事件上报               │
+  │                                                         │
+  │   高通实现: sthal (SoundTrigger HAL)                    │
+  │   路径: vendor/qcom/proprietary/mm-audio/              │
+  └─────────────────────────────────────────────────────────┘
+           │ SPF API
+           ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │ ADSP LPI                                                │
+  │   VAD → KWD → Dam (Look-Ahead Buffer)                 │
+  │   → 检测到唤醒词 → IRQ → AP                           │
+  └─────────────────────────────────────────────────────────┘
+```
+
+### 9.1 SoundTrigger HAL 关键接口
+
+```c
+// ISoundTriggerHw.aidl 关键方法:
+
+// 加载声学模型到 ADSP
+ndk::ScopedAStatus loadSoundModel(
+    const SoundModel& soundModel,
+    const sp<ISoundTriggerHwCallback>& callback,
+    int32_t* modelHandle);
+
+// 开始识别
+ndk::ScopedAStatus startRecognition(
+    int32_t modelHandle,
+    const RecognitionConfig& config);
+
+// 停止识别
+ndk::ScopedAStatus stopRecognition(int32_t modelHandle);
+
+// 回调: 识别事件
+void recognitionCallback(
+    const RecognitionEvent& event);
+    // event.data = Look-Ahead Buffer (LAB) PCM 数据
+    // → App 可以从 event 中读取唤醒前后的音频
+```
+
+---
+
+## 10. 多唤醒词并发与第三方集成
+
+```
+多唤醒词并发方案:
+
+  场景: "小爱同学" + "OK Google" + "Alexa" 同时监听
+  
+  方案 1: 多模型并行 (高通 SVA 3.0+)
+    ADSP 同时运行多个 KWD 模型:
+      Model 1: "小爱同学" (OEM 定制)
+      Model 2: "OK Google" (GMS 要求)
+      Model 3: "Alexa" (第三方 App)
+    → 共享同一路 DMIC 输入
+    → 各自独立的 confidence threshold
+    → 谁先达到阈值谁触发
+    
+  方案 2: 分时复用
+    一次只监听一个唤醒词, 用户在设置中切换
+    → 功耗更低, 但体验不如并发
+    
+  ADSP 资源限制:
+    - SM8650: 最多 3 个并发模型
+    - SM8550: 最多 3 个并发模型
+    - SM8450: 最多 2 个并发模型
+    - 模型越多, 功耗越高 (每个 +0.5~1mW)
+    
+  Android 13+ Concurrent Capture:
+    多个 App 同时使用 SoundTrigger:
+    → SoundTriggerMiddleware 负责仲裁
+    → ADSP 侧通过 Dam Module 为每个 Client 缓存 LAB
+```
+
+---
+
+## 11. LPI 功耗实测方法
+
+```bash
+# === 功耗测量工具 ===
+# 1. Monsoon Power Monitor (硬件)
+#    → 精度: µA 级, 采样率 5kHz
+#    → 串联在电池供电路径上
+
+# 2. Qualcomm QPM (Qualcomm Power Measurement)
+#    → 软件工具, 读取 PMIC 寄存器
+#    → 可看到各路电源独立功耗
+
+# 3. systrace / perfetto 配合
+#    → 确认 ADSP island 是否真的在低功耗模式
+
+# === 测量步骤 ===
+# Step 1: 建立 Baseline (无唤醒监听)
+adb shell settings put secure voice_interaction_service ""
+# 息屏待机 30s, 记录平均电流
+
+# Step 2: 启动唤醒监听
+adb shell settings put secure voice_interaction_service \
+    "com.google.android.googlequicksearchbox/.GsaVoiceInteractionService"
+# 息屏待机 30s, 记录平均电流
+
+# Step 3: 计算 LPI 增量
+# LPI 功耗 = Step2 平均电流 - Step1 平均电流
+# 典型值: 0.3~1.5 mA (取决于模型数量和复杂度)
+
+# === 功耗基准 ===
+# SM8650 LPI 典型功耗:
+#   仅 VAD:           ~0.2 mA
+#   VAD + 1 个 KWD:   ~0.5 mA
+#   VAD + 2 个 KWD:   ~0.8 mA
+#   VAD + 3 个 KWD:   ~1.2 mA
+#   (以 3.8V 电池电压计, 1mA ≈ 3.8mW)
+```
+
+---
+
+## 12. 关键参考 (References)
 
 1.  80-VN500-20: *Low Power Island Voice Activation in AudioReach*
 2.  80-VN500-3: *AudioReach Signal Processing Framework Overview*
 3.  80-VN500-16: *AudioReach SPF Technical Overview*
 4.  [Android SoundTrigger Documentation](https://source.android.com/docs/core/audio/sound-trigger)
 5.  [Qualcomm SVA (Snapdragon Voice Activation) White Paper](https://developer.qualcomm.com/)
+6.  [Android SoundTrigger HAL AIDL Interface](https://cs.android.com/android/platform/superproject/+/master:hardware/interfaces/soundtrigger/)

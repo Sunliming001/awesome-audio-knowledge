@@ -45,31 +45,184 @@ graph LR
 
 ---
 
-## 3. 接口演进：从 3.5mm 到 USB-C/蓝牙
+## 3. 旗舰 SoC 音频参考设计
 
-### 3.1 3.5mm 耳机孔的消失
-*   **内部影响**：节省了大量的 PCB 空间。
-*   **外部影响**：音频信号从**模拟输出**转向了**数字输出**。
+### 3.1 Qualcomm SM8650 (Snapdragon 8 Gen 3) 音频子系统
 
-### 3.2 USB-C 音频 (USB Audio Class)
-*   **模拟模式 (Accessory Mode)**：使用 USB-C 的边带引脚传输模拟信号，依赖手机内部 Codec。
-*   **数字模式**：音频数据以 USB 数据包形式传输，由耳机或转接头内部的 DAC 芯片进行转换。
+```mermaid
+graph TD
+    subgraph SM8650 ["Snapdragon 8 Gen 3 SoC"]
+        CPU["Kryo CPU<br/>(8 核)"]
+        ADSP["Hexagon ADSP<br/>(AudioReach SPF)"]
+        CDSP["Hexagon cDSP<br/>(计算 DSP)"]
+        LPASS["LPASS Island<br/>(低功耗音频)"]
+        SWR["SoundWire Master<br/>(x2 总线)"]
+    end
+    
+    subgraph Codec ["WCD9395 Codec"]
+        DAC["DAC x4<br/>(32bit/384kHz)"]
+        ADC["ADC x8<br/>(24bit/192kHz)"]
+        MBHC["MBHC<br/>(耳机检测)"]
+    end
+    
+    subgraph SmartPA_Block ["SmartPA"]
+        WSA["WSA8845H x2<br/>(立体声 Smart PA)"]
+    end
+    
+    subgraph Transducers ["换能器"]
+        SPK_T["扬声器 (Top)"]
+        SPK_B["扬声器 (Bottom)"]
+        RCV["听筒/Receiver"]
+        MIC_T["Top Mic"]
+        MIC_B["Bottom Mic x2"]
+        MIC_U["Ultrasound Mic"]
+    end
+    
+    CPU <-->|"AudioReach (PAL/AGM)"| ADSP
+    ADSP <-->|"SoundWire Digital"| SWR
+    SWR <--> Codec
+    SWR <--> WSA
+    LPASS -->|"VAD/KWD"| ADSP
+    
+    DAC --> RCV
+    ADC --> MIC_T
+    ADC --> MIC_B
+    WSA --> SPK_T
+    WSA --> SPK_B
+```
+
+### 3.2 SM8650 音频关键规格
+
+| 参数 | 规格 | 说明 |
+|:---|:---|:---|
+| Codec 芯片 | WCD9395 | 集成 4 DAC + 8 ADC |
+| SmartPA | WSA8845H × 2 | 支持 IV-Sense + 扬声器保护 |
+| 数字接口 | SoundWire v1.2 × 2 | 替代传统 I2S，支持多设备挂载 |
+| 播放能力 | 32bit / 384kHz | 原生 Hi-Res |
+| 录音能力 | 24bit / 192kHz | 8通道同时录音 |
+| DSP 架构 | Hexagon V73 | AudioReach SPF 框架 |
+| 低功耗岛 | LPASS Island | < 1mW 待机检测 |
+| SNR (DAC) | > 120dB | 独立耳机放大器 |
+| THD+N | < -105dB | @ 1kHz, 0dBFS |
+
+### 3.3 SoundWire 总线拓扑
+
+SoundWire 是 Qualcomm 平台上取代 I2S/SLIMbus 的新一代音频总线：
+
+```
+SoundWire 相比 I2S/SLIMbus 的优势:
+  ┌──────────────────┬──────────────┬────────────────┬─────────────────┐
+  │     维度         │     I2S      │   SLIMbus      │   SoundWire     │
+  ├──────────────────┼──────────────┼────────────────┼─────────────────┤
+  │ 引脚数           │ 4 线/通道     │ 2 线           │ 2 线            │
+  │ 设备挂载         │ 点对点        │ 多设备         │ 多设备          │
+  │ 带宽             │ 固定          │ 动态           │ 动态            │
+  │ 功耗             │ 中            │ 低             │ 极低            │
+  │ 控制通道         │ 需独立I2C     │ 内嵌           │ 内嵌            │
+  │ 同步             │ 外部          │ 内部           │ 内部 (Bank)     │
+  │ MIPI 标准        │ 否            │ 否             │ 是 (MIPI)       │
+  └──────────────────┴──────────────┴────────────────┴─────────────────┘
+```
+
+### 3.4 MediaTek Dimensity 9300 参考
+
+| 参数 | 规格 |
+|:---|:---|
+| Codec | MT6681 (集成) |
+| DSP | Tensilica HiFi5 |
+| SmartPA | 外置 (如 CS35L45) |
+| 数字接口 | I2S / SPI |
+| Hi-Res | 32bit / 384kHz |
+| 低功耗 | VoW (Voice on Wakeup) |
 
 ---
 
-## 4. 低功耗交互：语音唤醒 (Always-on Voice)
+## 4. 接口演进：从 3.5mm 到 USB-C/蓝牙
 
-现代手机支持熄屏唤醒，硬件上依赖：
-1.  **低功耗 LP-MEMS 麦克风**。
-2.  **DSP 中的 VAD (Voice Activity Detection) 模块**：只有检测到人类声音特征时，才激活后续更复杂的唤醒词匹配算法。
+### 4.1 接口时间线
+
+```
+2014        2016         2018         2020         2023
+ │           │            │            │            │
+ ▼           ▼            ▼            ▼            ▼
+3.5mm      USB-C 模拟    USB-C 数字    BT 5.0      LE Audio
+主流        (被动转接)    (主动DAC)     (TWS 爆发)   (LC3 标准化)
+```
+
+### 4.2 3.5mm 耳机孔的消失
+*   **内部影响**：节省 1.5-2mm PCB 高度，给电池和马达让空间。
+*   **外部影响**：音频信号从**模拟输出**转向**数字输出**。
+
+### 4.3 USB-C 音频 (USB Audio Class)
+
+| 模式 | 原理 | DAC 位置 | 音质 | 功耗 |
+|:---|:---|:---|:---|:---|
+| **模拟 (Accessory)** | USB-C CC 引脚切换为音频 | 手机内部 Codec | 受手机 DAC 限制 | 低 |
+| **数字 (UAC 1.0)** | USB 协议传输 PCM | 转接头/耳机内 | 取决于外部 DAC | 中 |
+| **数字 (UAC 2.0)** | USB 异步传输 | 外部 DAC | 可达 32/384 Hi-Res | 高 |
+
+### 4.4 蓝牙音频编码
+
+| 编码 | 码率 | 采样率 | 延迟 | 授权 |
+|:---|:---|:---|:---|:---|
+| SBC | 328kbps | 44.1/48kHz | ~150ms | 免费 |
+| AAC | 256kbps | 44.1/48kHz | ~120ms | 含专利 |
+| aptX HD | 576kbps | 48kHz/24bit | ~80ms | 高通 |
+| LDAC | 990kbps | 96kHz/24bit | ~100ms | Sony |
+| LC3 (LE Audio) | 160-345kbps | 8-48kHz | ~20ms | 免费 |
 
 ---
 
-## 5. 关键参考 (References)
+## 5. 低功耗交互：语音唤醒 (Always-on Voice)
 
-1.  *Mobile Phone Architecture and Design* - Specialized Industry Reports
-2.  [SmartPA Technology Overview - NXP/Cirrus Logic](https://www.cirrus.com/)
-3.  [Qualcomm Hexagon DSP Architecture](https://www.qualcomm.com/)
+### 5.1 低功耗唤醒架构
+
+```mermaid
+graph TD
+    subgraph Sleep ["AP 深度睡眠 (< 5mW)"]
+        AP_OFF["CPU 关闭"]
+    end
+    
+    subgraph LPASS ["LPASS Island (< 1mW)"]
+        LP_MIC["低功耗 MEMS 麦克风"]
+        VAD["VAD<br/>(语音活动检测)"]
+        KWD["KWD<br/>(关键词检测模型)"]
+    end
+    
+    subgraph Wakeup ["唤醒后"]
+        ADSP_ON["ADSP 激活"]
+        AP_ON["AP 激活<br/>语音识别 App"]
+    end
+    
+    LP_MIC --> VAD
+    VAD -->|"检测到人声"| KWD
+    KWD -->|"匹配唤醒词"| ADSP_ON
+    ADSP_ON --> AP_ON
+```
+
+### 5.2 功耗分析
+
+```
+各阶段功耗:
+  待机监听 (VAD only):     ~0.3 mW
+  二级检测 (KWD):          ~1.5 mW (仅在 VAD 触发后)
+  ADSP 全速处理:           ~15 mW
+  AP 唤醒 + ASR:           ~500 mW (仅在 KWD 确认后)
+  
+误唤醒率 vs 功耗 tradeoff:
+  VAD 灵敏度 ↑ → 功耗 ↑ (频繁触发 KWD)
+  VAD 灵敏度 ↓ → 漏检率 ↑ (用户体验差)
+```
+
+---
+
+## 6. 关键参考 (References)
+
+1.  [Qualcomm SM8650 Audio Subsystem](https://www.qualcomm.com/products/mobile/snapdragon/smartphones/snapdragon-8-series-mobile-platforms)
+2.  [WCD9395 Codec Datasheet](https://www.qualcomm.com/)
+3.  [MIPI SoundWire Specification](https://www.mipi.org/specifications/soundwire)
+4.  [SmartPA Technology Overview - Cirrus Logic](https://www.cirrus.com/)
+5.  [USB Audio Class 2.0 Specification](https://www.usb.org/)
 
 ---
 *Next Topic: [车载音频硬件架构 (Automotive Audio Hardware)](./04-Automotive-Hardware.md)*

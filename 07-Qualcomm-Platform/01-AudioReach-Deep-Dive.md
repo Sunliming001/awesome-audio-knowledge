@@ -1,98 +1,364 @@
 # Qualcomm AudioReach 架构深度解析
 
-AudioReach（也称为 Signal Processing Framework, SPF）是高通 (Qualcomm) 推出的下一代音频信号处理架构。它不仅实现了算法的模块化，还通过一套复杂的软件中间层（PAL, AGM）实现了软硬件的高度解耦。
+AudioReach（也称为 Signal Processing Framework, SPF）是高通 (Qualcomm) 推出的下一代音频信号处理架构。它不仅实现了算法的模块化，还通过一套复杂的软件中间层（PAL, AGM）实现了软硬件的高度解耦。本章深入分析每一层的职责、关键数据流、配置体系以及调试方法。
 
 ---
 
-## 1. 系统全景架构 (Software Layers)
+## 1. 架构演进：旧架构 vs AudioReach
 
-AudioReach 的核心理解点在于高通对 TinyALSA 的扩展，将其分成了普通 TinyALSA 和 **TinyALSA Plugins** 两部分。
+```
+旧架构 (SM8350 及以前):
+  ┌───────────────────────────────────┐
+  │ Audio HAL → TinyALSA → Kernel FE+BE Driver → ADSP │
+  └───────────────────────────────────┘
+  问题:
+    - FE 驱动在 Kernel, 修改需要改内核代码
+    - Graph 拓扑硬编码, 不够灵活
+    - 调试困难 (需要 Kernel log + DSP log 对照)
 
-```mermaid
-graph TD
-    subgraph "High-Level OS (Android/Linux)"
-        HAL[Audio HAL]
-        PAL[PAL - Platform Audio Layer]
-    end
-
-    subgraph "Middleware (Linux Userspace)"
-        AGM[AGM - Audio Graph Manager]
-        GSL[GSL - Graph Service Library]
-    end
-
-    subgraph "Kernel Space"
-        TAP[TinyALSA Plugins]
-        ALSA[ALSA Driver - BE Only]
-    end
-
-    subgraph "DSP (Hexagon)"
-        SPF[SPF Framework]
-        APM[APM - Audio Processing Manager]
-    end
-
-    HAL --> PAL
-    PAL --> AGM
-    AGM --> GSL
-    GSL --> SPF
-    PAL -- Mixer Control --> TAP
-    TAP --> AGM
+AudioReach (SM8450+):
+  ┌───────────────────────────────────────────────┐
+  │ Audio HAL → PAL → AGM → GSL → GPR → SPF/APM  │
+  │                ↕                               │
+  │         TinyALSA Plugins → Kernel (BE Only)    │
+  └───────────────────────────────────────────────┘
+  优势:
+    - FE 虚拟化到用户空间
+    - Graph 拓扑由 XML + Key Vector 动态配置
+    - 分层清晰, 各层可独立调试
+    - CAPI 模块化, 算法可插拔
 ```
 
 ---
 
-## 2. 关键组件详解
+## 2. 系统全景架构
 
-### 2.1 PAL (Platform Audio Layer)
-*   **职责**：提供高级 API 访问 QTI 音频硬件。
-*   **核心逻辑**：解析 `resourcemanager.xml`，管理 Front-End (FE) 设备，维护 Stream 到 GKV 的映射。
-
-### 2.2 AGM (Audio Graph Manager)
-*   **职责**：运行在用户空间的音频服务。
-*   **功能**：管理 FE 与 Back-End (BE) 的连接，使用 GKV 和 CKV 设置 GSL 会话，配置硬件端点（I2S, TDM）。
-
-### 2.3 键值对管理 (Key Vectors)
-AudioReach 使用“键值对”来描述和控制 Graph。
-*   **GKV (Graph Key Vector)**：唯一标识一个 Graph。例如 `StreamRx=Pcm_Deep_Buffer`。
-*   **CKV (Calibration Key Vector)**：模块的调试参数（如音量级别、EQ 系数）。
-*   **TKV (Tag Key Vector)**：用于运行时动态控制模块参数（如实时增益调节）。
-
-### 2.4 TinyALSA Plugins
-*   **翻译官**：将 ALSA 的 `mixer_ctl` 操作和 PCM 操作转换为 AGM API 调用。它使得应用层可以像操作传统声卡一样操作复杂的 DSP 图形。
+```mermaid
+graph TD
+    subgraph App ["Application"]
+        TRACK["AudioTrack / AudioRecord"]
+    end
+    
+    subgraph Framework ["Android Framework"]
+        AF["AudioFlinger"]
+        APS["AudioPolicyService"]
+    end
+    
+    subgraph HAL ["Audio HAL (AIDL)"]
+        AHAL["Audio HAL Primary"]
+    end
+    
+    subgraph PAL_Layer ["PAL (Platform Audio Layer)"]
+        PAL["PAL API"]
+        RM["Resource Manager"]
+        STREAM["Stream Manager"]
+    end
+    
+    subgraph AGM_Layer ["AGM (Audio Graph Manager)"]
+        AGM["AGM Service"]
+        GSL["GSL (Graph Service Library)"]
+    end
+    
+    subgraph Kernel ["Kernel Space"]
+        PLUGIN["TinyALSA Plugins"]
+        BE_DRV["ALSA BE Driver<br/>(I2S/TDM/SoundWire)"]
+    end
+    
+    subgraph DSP ["Hexagon ADSP"]
+        GPR["GPR (Generic Packet Router)"]
+        APM["APM (Audio Processing Manager)"]
+        SPF["SPF (Signal Processing Framework)"]
+        CAPI["CAPI Modules<br/>(Volume/EQ/AEC/...)"]
+    end
+    
+    TRACK --> AF
+    AF --> AHAL
+    APS --> AHAL
+    AHAL --> PAL
+    PAL --> RM
+    PAL --> STREAM
+    STREAM --> AGM
+    AGM --> GSL
+    GSL --> GPR
+    GPR --> APM
+    APM --> SPF
+    SPF --> CAPI
+    
+    PAL -->|"Mixer Ctl"| PLUGIN
+    PLUGIN -->|"AGM Ioctl"| AGM
+    BE_DRV -->|"HW I/F"| DSP
+```
 
 ---
 
-## 3. 配置文件流 (XML Parsing Flow)
+## 3. 各层详解
 
-系统在开机初始化时（`pal_init`），通过 **Resource Manager** 加载三个核心 XML：
+### 3.1 PAL (Platform Audio Layer)
 
-1.  **`card-defs.xml`**：定义虚拟节点（PCMs/Mixers）设备。
-2.  **`resourcemanager.xml`**：定义设备到后端的映射、策略属性以及音频路由。
-3.  **`usecaseKvManager.xml`**：管理 Usecase 到 GKV 的映射逻辑。
+```
+PAL 层核心职责:
+
+  文件位置: vendor/qcom/opensource/pal/
+  
+  1. Stream 管理:
+     ├── StreamPCM      (普通 PCM 播放/录音)
+     ├── StreamCompress  (Offload 播放)
+     ├── StreamSoundTrigger (关键词检测)
+     └── StreamUPD       (超声接近检测)
+     
+  2. Device 管理:
+     ├── DeviceRxSpeaker / DeviceRxHeadphone
+     ├── DeviceTxMic / DeviceTxHandset
+     └── DeviceBT_A2DP / DeviceBT_SCO
+     
+  3. Resource Manager:
+     ├── 解析 resourcemanager.xml
+     ├── 管理设备连接/断开
+     ├── 音频路由策略 (Device → Backend 映射)
+     └── 并发策略 (StreamPriority, 通话优先)
+     
+  4. Session 管理:
+     ├── SessionAlsaPcm (PCM 数据通路)
+     ├── SessionAlsaCompress (Compress 通路)
+     └── SessionAlsaVoice (语音通话通路)
+```
+
+### 3.2 AGM (Audio Graph Manager)
+
+```
+AGM 层核心职责:
+
+  文件位置: vendor/qcom/opensource/agm/
+  
+  1. Graph 生命周期管理:
+     OPEN → PREPARE → START → STOP → CLOSE
+     
+  2. FE-BE 连接:
+     ├── 接收 PAL 的 GKV 配置
+     ├── 查询 ACDB 获取 Graph 拓扑
+     ├── 建立 FE→Module Chain→BE 路径
+     └── 管理多个并发 Session
+     
+  3. AGM 接口 (通过 TinyALSA Plugin 暴露):
+     ├── agm_session_open()
+     ├── agm_session_set_config()
+     ├── agm_session_prepare()
+     ├── agm_session_start()
+     ├── agm_session_read/write()
+     └── agm_session_close()
+```
+
+### 3.3 GSL (Graph Service Library)
+
+```
+GSL 核心功能:
+
+  1. ACDB 数据解析:
+     ├── 从 acdb.mdb (SQLite) 加载 Graph 拓扑
+     ├── 解析 SubGraph → Module → Connection
+     └── 获取模块的默认校准参数
+     
+  2. GPR 协议封装:
+     ├── 将 Graph 命令封装为 GPR Packet
+     ├── 通过 /dev/gpr_channel 发送到 ADSP
+     └── 接收 DSP 侧的应答和事件
+
+  3. 内存管理:
+     ├── Shared Memory 分配 (PCM 数据传输)
+     └── Calibration Memory (参数下发)
+```
+
+### 3.4 键值对管理 (Key Vectors)
+
+| 键类型 | 全称 | 作用 | 示例 |
+|:---|:---|:---|:---|
+| **GKV** | Graph Key Vector | 唯一标识 Graph 拓扑 | `{StreamRx=DeepBuffer, DeviceRx=Speaker}` |
+| **CKV** | Calibration Key Vector | 选择校准参数集 | `{Volume=Level5, SamplingRate=48000}` |
+| **TKV** | Tag Key Vector | 运行时动态控制 | `{MuteTag=Unmute, GainTag=-6dB}` |
+
+```
+Key Vector 如何工作:
+
+  1. PAL 根据 Usecase 构建 GKV
+     例: 播放音乐到扬声器
+     GKV = {StreamType=PCM_RX, DeviceType=SPEAKER, 
+            Instance=1, SamplingRate=48000}
+            
+  2. AGM 用 GKV 查询 ACDB → 获取 Graph ID
+     Graph ID 对应一组 SubGraph:
+       SubGraph_1: [WR_EP → VOLUME → PEQ → MFC]     (PP SubGraph)
+       SubGraph_2: [DEVICE_MFC → HW_EP_RX]            (Device SubGraph)
+       
+  3. PAL 用 CKV 选择校准参数
+     CKV = {VolumeLevel=5} → 加载 Volume 模块的 Level5 增益表
+     
+  4. 运行时用 TKV 动态控制
+     TKV = {MuteTag=1} → 发送 Mute 命令到 Volume 模块
+```
 
 ---
 
-## 4. DPCM：前端 (FE) 与 后端 (BE) 的革命
+## 4. 数据流详解
 
-在旧架构（8350 以前）中，FE 和 BE 驱动都在 Kernel 中。而在 AudioReach (8450+) 中：
-*   **FE (Front-End)**：移至 **HAL/PAL 层** 虚拟化。
-*   **BE (Back-End)**：留在 **Kernel** 中，负责上电逻辑和物理接口。
-*   **优势**：极大地减小了内核音频驱动的复杂度，将逻辑转移到更易调试的用户空间。
+### 4.1 播放路径 (Playback Data Flow)
+
+```mermaid
+sequenceDiagram
+    participant App as App
+    participant AF as AudioFlinger
+    participant HAL as Audio HAL
+    participant PAL as PAL
+    participant AGM as AGM
+    participant DSP as ADSP (SPF)
+    participant HW as Codec/Speaker
+    
+    App->>AF: write(PCM data)
+    AF->>AF: 混音/重采样/音效
+    AF->>HAL: write(mixed PCM)
+    HAL->>PAL: pal_stream_write()
+    PAL->>AGM: agm_session_write()
+    AGM->>DSP: Shared Memory → DMA
+    DSP->>DSP: Volume → EQ → DRC → MFC
+    DSP->>HW: I2S/TDM/SoundWire
+```
+
+### 4.2 录音路径 (Capture Data Flow)
+
+```
+Mic → Codec ADC → I2S/SoundWire → ADSP
+  → SPF Graph: [HW_EP_TX → DEVICE_MFC → EC_REF_MUX → AEC → NS → VOLUME → WR_EP]
+  → Shared Memory → AGM → PAL → HAL → AudioFlinger → App
+```
 
 ---
 
-## 5. 核心代码路径 (Expert Path)
+## 5. 配置文件体系
 
-### 5.1 启动 Graph 的流程
-1.  `StreamPCM::open` -> `SessionAlsaPcm::open`。
-2.  调用 `allocateFrontEndIds` 获取虚拟 PCM 节点（如 `pcm117`）。
-3.  `PayloadBuilder` 组装 GKV/CKV 数据包。
-4.  通过 `mixer_ctl_set_array` 将 Metadata 发送给 AGM。
-5.  AGM 最终通过 GPR 协议通知 DSP 上的 APM 开启 Graph。
+### 5.1 核心 XML 文件
+
+| 文件 | 路径 | 作用 |
+|:---|:---|:---|
+| **resourcemanager.xml** | `/vendor/etc/` | 设备映射、后端配置、并发策略 |
+| **card-defs.xml** | `/vendor/etc/` | 虚拟 PCM/Mixer 节点定义 |
+| **usecaseKvManager.xml** | `/vendor/etc/` | Usecase → GKV 映射 |
+| **mixer_paths.xml** | `/vendor/etc/` | Mixer 控件默认值 |
+| **acdb.mdb** | `/vendor/etc/acdbdata/` | Graph 拓扑 + 校准数据 (SQLite) |
+
+### 5.2 resourcemanager.xml 关键字段
+
+```xml
+<!-- 后端配置示例 -->
+<device_profile>
+    <in-device>
+        <id>PAL_DEVICE_IN_HANDSET_MIC</id>
+        <back_end_name>CODEC_DMA-LPAIF_VA-TX-0</back_end_name>
+        <max_channels>2</max_channels>
+        <channels>1</channels>
+        <snd_device_name>va-mic</snd_device_name>
+        <samplerate>48000</samplerate>
+        <bit_width>16</bit_width>
+    </in-device>
+</device_profile>
+
+<!-- 并发策略 -->
+<usecase>
+    <name>PAL_STREAM_VOIP_RX</name>
+    <priority>1</priority>  <!-- 最高优先 -->
+    <device_pp_enable>true</device_pp_enable>
+</usecase>
+```
 
 ---
 
-## 6. 关键参考 (References)
+## 6. Graph 生命周期
 
-1.  *SA8295 ADSP Software Architecture* - Qualcomm Documentation
+```
+Graph 状态机:
+
+  ┌──────┐   open()   ┌─────────┐  prepare()  ┌──────────┐
+  │ IDLE │──────────→│ OPENED  │──────────→│ PREPARED │
+  └──────┘           └─────────┘           └──────────┘
+                                                │
+                                           start()
+                                                │
+                                                ▼
+  ┌──────┐   close()  ┌─────────┐  stop()   ┌─────────┐
+  │ IDLE │←──────────│ STOPPED │←─────────│ STARTED │
+  └──────┘           └─────────┘           └─────────┘
+
+  各阶段的 DSP 操作:
+    open:    分配 Graph 资源, 加载模块
+    prepare: 下发校准参数 (CKV), 配置端口
+    start:   使能 DMA, 开始数据流
+    stop:    停止 DMA, 保留 Graph
+    close:   释放所有资源
+```
+
+---
+
+## 7. 调试方法
+
+### 7.1 常用调试命令
+
+```bash
+# 查看 PAL 层状态
+adb shell dumpsys vendor.audio.hardware | grep -A 50 "PAL"
+
+# 查看 AGM session 信息
+adb shell cat /proc/agm/sessions
+
+# 查看 DSP Graph 状态
+adb shell cat /proc/snd/card0/graph_info
+
+# 查看当前活跃的 PCM 流
+adb shell cat /proc/asound/pcm
+
+# 查看 Mixer 控件 (Key Vector 相关)
+adb shell tinymix | grep -i "metadata\|graph\|gkv"
+
+# 查看 ACDB 加载状态
+adb logcat -s ACDB AGM PAL AudioReach
+
+# GPR 调试 (DSP 侧通信)
+adb logcat -s GPR SPF APM
+```
+
+### 7.2 常见问题排查
+
+| 问题 | 可能原因 | 排查方法 |
+|:---|:---|:---|
+| 无声 | Graph 未 START / BE 未连接 | 检查 AGM session 状态, tinymix BE 路由 |
+| 爆音 | Graph 参数不匹配 (采样率/位宽) | 检查 resourcemanager.xml 配置 |
+| 崩溃 | ADSP SSR (子系统重启) | 检查 dmesg + DSP log |
+| 延迟高 | Graph 模块链过长 | 检查 ACDB Graph 拓扑, 精简模块 |
+| 切换卡顿 | 路由切换时 Graph 重建 | 优化 PAL device switch 逻辑 |
+
+### 7.3 日志关键词
+
+```
+关键 Logcat Tag:
+  PAL:        PAL 层 Stream/Device 操作
+  AGM:        AGM Session 生命周期
+  ACDB:       校准数据加载
+  GPR:        ADSP 通信协议
+  SPF:        DSP 信号处理框架
+  APM:        DSP 音频处理管理器
+  AHAL:       Audio HAL 层
+
+典型正常启动日志:
+  PAL: pal_stream_open: stream type=PCM_RX
+  AGM: agm_session_open: session_id=1
+  ACDB: GetGraph: GKV matched, graph_id=0x1234
+  GPR: gpr_send_pkt: opcode=APM_CMD_GRAPH_OPEN
+  SPF: graph_open: success, num_modules=5
+```
+
+---
+
+## 8. 关键参考 (References)
+
+1.  *SA8295/SM8650 ADSP Software Architecture* - Qualcomm Documentation
 2.  *AudioReach SPF Generic Packet Router (GPR) API Reference*
 3.  Qualcomm PAL/AGM Source Code (Vendor Proprietary)
+4.  [Qualcomm AudioReach Overview](https://developer.qualcomm.com/)
+5.  [ACDB Manager (QACT) User Guide](https://developer.qualcomm.com/)

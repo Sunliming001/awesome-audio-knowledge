@@ -180,7 +180,88 @@ LC3 编码流程:
 
 **核心优势**：LC3 在 **一半码率**下音质超越 SBC。
 
-### 4.4 Isochronous Channels (ISO)
+### 4.4 LE Audio 协议层次依赖关系
+
+LE Audio 由多个层次化的 Profile/Service 构成，每层依赖下层提供的能力：
+
+```mermaid
+graph BT
+    subgraph Top_Profiles ["顶层 Profiles (应用场景)"]
+        TMAP["TMAP<br/>(电话+媒体)"]
+        HAP["HAP<br/>(助听器)"]
+        PBP["PBP<br/>(公共广播/<br/>Auracast)"]
+        GMAP["GMAP<br/>(游戏)"]
+    end
+    
+    subgraph Mid_Profiles ["中间层 Profiles (协调)"]
+        CAP["CAP<br/>(通用音频协调)"]
+        CCP["CCP<br/>(呼叫控制)"]
+        MCP["MCP<br/>(媒体控制)"]
+    end
+    
+    subgraph Core_Profiles ["核心层 Profiles (基础能力)"]
+        BAP["BAP<br/>(基础音频)"]
+        VCP["VCP<br/>(音量控制)"]
+        MICP["MICP<br/>(麦克风控制)"]
+        CSIP["CSIP<br/>(协调集)"]
+    end
+    
+    subgraph Services ["底层 Services (GATT)"]
+        PACS["PACS<br/>(发布音频能力)"]
+        ASCS["ASCS<br/>(音频流控制)"]
+        BASS["BASS<br/>(广播扫描)"]
+        VCS["VCS<br/>(音量控制服务)"]
+        MICS["MICS<br/>(麦克风服务)"]
+        CSIS["CSIS<br/>(协调集标识)"]
+    end
+    
+    subgraph Transport ["传输层"]
+        ISO_T["Isochronous Channels<br/>(CIS + BIS)"]
+        LC3_T["LC3 编解码器"]
+    end
+    
+    TMAP --> CAP
+    HAP --> BAP
+    HAP --> MICP
+    PBP --> BAP
+    GMAP --> CAP
+    
+    CAP --> BAP
+    CAP --> CSIP
+    CAP --> VCP
+    CCP --> BAP
+    MCP --> BAP
+    
+    BAP --> PACS
+    BAP --> ASCS
+    BAP --> BASS
+    VCP --> VCS
+    MICP --> MICS
+    CSIP --> CSIS
+    
+    PACS --> ISO_T
+    ASCS --> ISO_T
+    ISO_T --> LC3_T
+```
+
+**层次依赖说明**：
+
+| 层 | 组件 | 职责 |
+|:---|:---|:---|
+| **传输层** | ISO Channels + LC3 | 提供时间敏感的音频数据传输 + 编解码 |
+| **Services** | PACS, ASCS, BASS, VCS 等 | GATT 服务，暴露能力和控制点 |
+| **核心 Profile** | BAP, VCP, MICP, CSIP | 定义基本音频连接、音量、麦克风控制 |
+| **协调 Profile** | CAP, CCP, MCP | 协调多设备、通话控制、媒体控制 |
+| **顶层 Profile** | TMAP, HAP, PBP, GMAP | 面向具体应用场景的完整解决方案 |
+
+**关键组件职责**：
+- **BAP (Basic Audio Profile)**：定义如何建立/释放音频流，是所有 LE Audio 音频的基础
+- **PACS (Published Audio Capabilities)**：设备声明支持的编解码能力（类似 A2DP 的 codec negotiation）
+- **ASCS (Audio Stream Control Service)**：管理音频流的状态机（Idle→Codec Configured→QoS Configured→Enabling→Streaming）
+- **CSIP (Coordinated Set Identification)**：将左/右耳识别为"一组设备"，实现同步操作
+- **CAP (Common Audio Profile)**：在 BAP 之上协调多设备多流场景
+
+### 4.5 Isochronous Channels (ISO)
 
 LE Audio 引入全新的传输机制替代 SCO/L2CAP：
 

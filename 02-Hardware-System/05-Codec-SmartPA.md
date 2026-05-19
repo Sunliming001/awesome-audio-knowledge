@@ -36,7 +36,7 @@ graph LR
 
 | 型号 | 定位 | 关键特性 |
 |:---|:---|:---|
-| **WCD9380** | 旗舰 | 32-bit/384kHz, DSD256 Native, SoundWire |
+| **WCD9380** | 旗舰 | 32-bit/384kHz, DSD128 (DoP), SoundWire |
 | **WCD9385** | 旗舰增强 | 支持更多并发 SoundWire 通路 |
 | **WCD937x** | 中端 | 24-bit/192kHz, 成本优化 |
 

@@ -114,6 +114,7 @@ graph TD
 *   车载自定义焦点 (CarAudioFocus) 与音量组管理 (Volume Groups)
 *   主动降噪与路噪消除 (ANC/RNC)：FxLMS 算法、MIMO 架构、ESE 声浪模拟
 *   AudioControl HAL 与 AAOS 架构演进：AIDL 接口、Hypervisor 多 OS 隔离、AVB/TSN
+*   高通车载音频平台 (SA8295)：多域架构、Bringup 流程、TDM 配置、车载 AudioReach Graph、HFP 通话
 
 ### [07. 高通平台专题 (Qualcomm Platform)](./07-Qualcomm-Platform)
 深度解析高通平台的专有音频技术。

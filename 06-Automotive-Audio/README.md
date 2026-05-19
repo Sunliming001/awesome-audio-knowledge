@@ -33,5 +33,14 @@
     *   AAOS 架构演进：分布式 → 域控集中 → 中央计算。
     *   Hypervisor 多 OS 音频隔离与 Ethernet AVB/TSN。
 
+6.  **[高通车载音频平台 — SA8295 (Qualcomm Automotive Audio)](./06-Qualcomm-Automotive-Audio.md)**
+    *   SA8295 音频硬件架构与手机平台差异对比。
+    *   QNX Hypervisor 多域音频隔离与优先级仲裁。
+    *   Audio Bringup 全流程 Checklist 与 DTS 配置示例。
+    *   TDM 多通道配置：端口映射、Slot 分配、时钟问题排查。
+    *   车载 AudioReach 典型 Graph：播放/录音/HFP 通话。
+    *   车载 Audio HAL 扩展与多 Bus 配置。
+    *   车载场景调试命令与常见问题诊断。
+
 ---
 [返回主目录](../README.md)

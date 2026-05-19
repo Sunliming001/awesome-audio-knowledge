@@ -32,5 +32,13 @@
     *   语音通信：AMR-WB、EVS、Opus。
     *   沉浸式：Dolby AC-4、MPEG-H、IAMF。
 
+6.  **[AI 音频处理 (AI-Powered Audio)](./06-AI-Audio.md)**
+    *   AI 降噪：RNNoise / DTLN / DCCRN 等模型架构与对比。
+    *   AI 回声消除：NN-AEC 原理与混合 Pipeline。
+    *   端侧部署：TFLite / SNPE / QNN、量化、模型压缩。
+    *   语音识别 ASR：Conformer-Transducer、Whisper、端侧 KWD。
+    *   语音合成 TTS：FastSpeech2 + HiFi-GAN 端侧方案。
+    *   神经音频编解码：EnCodec / SoundStream / RVQ。
+
 ---
 [返回主目录](../README.md)

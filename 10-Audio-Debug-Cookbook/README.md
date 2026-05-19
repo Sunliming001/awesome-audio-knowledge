@@ -15,5 +15,13 @@
     *   场景二：耳机插入的全栈变化（Hardware → Kernel → Policy → DAPM）。
     *   知识库模块关联地图：串联 01-11 各模块。
 
+3.  **[音频功耗优化 (Power Optimization)](./03-Power-Optimization.md)**
+    *   音频全链路功耗模型：AP / DSP / Codec / 接口。
+    *   Offload 播放：硬件解码卸载与配置。
+    *   AP Suspend 与 Wake Lock 管理。
+    *   DSP 低功耗模式：LPI / Clock Scaling。
+    *   Codec DAPM 电源管理优化。
+    *   功耗调试命令速查与常见问题诊断。
+
 ---
 [返回主目录](../README.md)

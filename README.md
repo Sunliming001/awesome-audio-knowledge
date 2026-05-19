@@ -89,6 +89,7 @@ graph TD
 *   音效处理: 均衡器 (EQ), 混响 (Reverb), 动态范围控制 (DRC)
 *   语音交互: 语音唤醒 (KWS), 语音识别 (ASR), 文本转语音 (TTS), 自然语言理解 (NLU)
 *   空间音频深度解析: HRTF、Ambisonics、Dolby Atmos、头部追踪
+*   AI 音频处理: AI 降噪、NN-AEC、端侧部署 (TFLite/SNPE/QNN)、神经编解码 (EnCodec)
 
 ### [04. Android 音频架构 (Android Audio Stack)](./04-Android-Audio-Stack)
 针对 Android 音频系统的手术级拆解。
@@ -145,6 +146,7 @@ graph TD
 *   Perfetto 音频 trace：抓取方法、关键事件、调度分析
 *   常见问题 Cookbook：无声、爆音、延迟、功耗、路由异常诊断流程图
 *   audioserver Crash/ANR 分析：Tombstone 解读、死锁诊断
+*   音频功耗优化：Offload 卸载、AP Suspend、LPI 低功耗岛、DAPM 电源管理
 
 ### [11. 学习路径与资源 (Learning Path & Resources)](./11-Learning-Path-Resources)
 如何系统化自学及行业参考。

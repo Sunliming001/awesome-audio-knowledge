@@ -28,7 +28,7 @@ DAC (Digital-to-Analog Converter):
 
 现代 ADC/DAC 类型:
   Sigma-Delta (ΣΔ): 高过采样 + 噪声整形, 音频领域主流
-  SAR: 快速, 中等精度, 用于控制/传感
+  SAR (Successive Approximation Register, 顺序逼近寄存器): 快速, 中等精度, 用于控制/传感
   Pipeline: 高速, 视频/通信应用
 ```
 
@@ -105,7 +105,7 @@ Android SRC 位置:
 
 ## 3. 量化 (Quantization) 与位深
 
-### 3.1 SQNR 与动态范围
+### 3.1 SQNR (Signal-to-Quantization-Noise Ratio, 信号与量化噪声比) 与动态范围
 
 $$\text{SQNR} \approx 6.02N + 1.76 \text{ dB}$$
 
@@ -122,7 +122,7 @@ $$\text{SQNR} \approx 6.02N + 1.76 \text{ dB}$$
 定点 (Fixed-Point):
   格式: Q1.15 (16-bit), Q1.31 (32-bit)
   范围: [-1.0, +1.0) 或 [0, 2^N - 1]
-  优势: 硬件简单, DSP/ASIC 常用
+  优势: 硬件简单, DSP/ASIC (Application-Specific Integrated Circuit, 专用集成电路) 常用
   劣势: 动态范围有限, 需要手动管理溢出
   
   Q1.15 示例:
@@ -150,8 +150,8 @@ $$\text{SQNR} \approx 6.02N + 1.76 \text{ dB}$$
   方案: 量化前加入随机噪声 (幅度 ~1 LSB)
   
   类型:
-    RPDF (矩形概率密度): ±0.5 LSB, 消除失真相关性
-    TPDF (三角概率密度): ±1 LSB, 完全消除失真
+    RPDF (Rectangular Probability Density Function, 矩形概率密度): ±0.5 LSB, 消除失真相关性
+    TPDF (Triangular Probability Density Function, 三角概率密度): ±1 LSB, 完全消除失真
     Shaped Dither: 结合噪声整形
   
 噪声整形 (Noise Shaping):

@@ -31,13 +31,13 @@ I2S 标准使用 3 根信号线:
   │ BCLK (Bit Clock)    位时钟, 每个边沿传输 1 bit         │
   │ LRCLK / WS          帧同步 (左/右声道选择)             │
   │   (Word Select)     0 = Left, 1 = Right (标准 I2S)     │
-  │ SD (Serial Data)    串行数据线, MSB first              │
+  │ SD (Serial Data)    串行数据线, MSB (Most Significant Bit) first │
   └─────────────────────────────────────────────────────────┘
   
   可选信号:
     MCLK (Master Clock): 主时钟, 通常 = 256 × Fs 或 512 × Fs
       → 部分 Codec 需要 MCLK 才能锁相产生内部时钟
-      → 现代 Codec (如 WCD938x) 可用 PLL 自恢复, 不需要 MCLK
+      → 现代 Codec (如 WCD938x) 可用 PLL (Phase-Locked Loop, 锁相环) 自恢复, 不需要 MCLK
       
   时钟关系:
     BCLK = Fs × Channels × Bit_Depth
@@ -67,7 +67,7 @@ I2S 标准使用 3 根信号线:
      DATA: -----[MSB         LSB]-[MSB         LSB]---
                 ↑ MSB 在此 (WS翻转后第1个BCLK)
      
-  3. Right Justified (右对齐 / EIAJ):
+  3. Right Justified (右对齐 / EIAJ, Electronic Industries Association of Japan):
      LSB 与 WS 翻转对齐 (数据右对齐)
      → 常见于旧式日系 DAC
      
@@ -381,8 +381,8 @@ PDM → PCM 转换链 (在 SoC 的数字音频前端完成):
     │
     ▼
   ┌──────────────────────────────────┐
-  │ CIC 滤波器 (Cascaded            │
-  │ Integrator-Comb)                 │
+  │ CIC 滤波器 (Cascaded Integrator-Comb,  │
+  │ 级联积分梳状滤波器)               │
   │   → 抽取 (Decimation) 降低采样率│
   │   → 3.072MHz ÷ 64 = 48kHz       │
   │   → 输出: 多位 PCM              │

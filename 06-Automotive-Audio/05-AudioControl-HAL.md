@@ -1,6 +1,6 @@
 # AudioControl HAL 与 AAOS 音频架构演进
 
-AudioControl HAL 是 Android Automotive OS (AAOS) 特有的音频硬件抽象层，负责连接 Android 框架层与车载底层音频硬件（外部 DSP、功放、MCU）。本章同时梳理 AAOS 音频架构从分布式到集中式的演进路线。
+AudioControl HAL 是 Android Automotive OS (AAOS) 特有的音频硬件抽象层，负责连接 Android 框架层与车载底层音频硬件（外部 DSP、功放、MCU (Microcontroller Unit, 微控制器)）。本章同时梳理 AAOS 音频架构从分布式到集中式的演进路线。
 
 ---
 
@@ -261,7 +261,7 @@ graph TD
 
 ---
 
-## 5. VHAL (Vehicle HAL) 音频交互
+## 5. VHAL (Vehicle HAL, 车辆硬件抽象层) 音频交互
 
 ### 5.1 VHAL 与音频相关的属性
 

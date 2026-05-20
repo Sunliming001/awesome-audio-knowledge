@@ -108,9 +108,9 @@ LDAC 使用 **MDCT (改进离散余弦变换)** + **频谱包络编码** + **细
 |:---|:---|:---|
 | **方向** | 单向 (Source → Sink) | 双向 (全双工) |
 | **音质** | 高质量 (立体声) | 窄带/宽带语音 (单声道) |
-| **编解码** | SBC/AAC/LDAC 等 | CVSD (窄带) / mSBC (宽带) |
+| **编解码** | SBC/AAC/LDAC 等 | CVSD (Continuously Variable Slope Delta Modulation, 窄带) / mSBC (modified SBC, 宽带) |
 | **采样率** | 44.1-96 kHz | 8 kHz (CVSD) / 16 kHz (mSBC) |
-| **传输** | L2CAP | SCO/eSCO 链路 |
+| **传输** | L2CAP | SCO/eSCO (Extended Synchronous Connection-Oriented) 链路 |
 | **延迟要求** | 可容忍较高延迟 | 严格 (<150ms 端到端) |
 
 ### 3.2 SCO 链路特点
@@ -250,9 +250,9 @@ graph BT
 |:---|:---|:---|
 | **传输层** | ISO Channels + LC3 | 提供时间敏感的音频数据传输 + 编解码 |
 | **Services** | PACS, ASCS, BASS, VCS 等 | GATT 服务，暴露能力和控制点 |
-| **核心 Profile** | BAP, VCP, MICP, CSIP | 定义基本音频连接、音量、麦克风控制 |
-| **协调 Profile** | CAP, CCP, MCP | 协调多设备、通话控制、媒体控制 |
-| **顶层 Profile** | TMAP, HAP, PBP, GMAP | 面向具体应用场景的完整解决方案 |
+| **核心 Profile** | BAP, VCP (Volume Control Profile), MICP (Microphone Control Profile), CSIP | 定义基本音频连接、音量、麦克风控制 |
+| **协调 Profile** | CAP, CCP (Call Control Profile), MCP (Media Control Profile) | 协调多设备、通话控制、媒体控制 |
+| **顶层 Profile** | TMAP, HAP, PBP (Public Broadcast Profile), GMAP (Gaming Audio Profile) | 面向具体应用场景的完整解决方案 |
 
 **关键组件职责**：
 - **BAP (Basic Audio Profile)**：定义如何建立/释放音频流，是所有 LE Audio 音频的基础
@@ -285,7 +285,7 @@ graph TD
 **CIS (Connected Isochronous Stream)**：
 - 点对点，支持双向
 - 多流：手机可同时向左右耳发送**独立 CIS**，实现真正的独立左右耳
-- 支持不同 QoS 配置（可靠性 vs 延迟）
+- 支持不同 QoS (Quality of Service, 服务质量) 配置（可靠性 vs 延迟）
 
 **BIS (Broadcast Isochronous Stream)**：
 - 一对多广播，无连接
@@ -344,10 +344,10 @@ LE Audio 低延迟模式 (~20-30ms):
 
 | 现象 | 可能原因 | 排查方向 |
 |:---|:---|:---|
-| **音乐断续/卡顿** | 2.4GHz 干扰、距离过远 | 检查 RSSI、切换 codec 降码率 |
+| **音乐断续/卡顿** | 2.4GHz 干扰、距离过远 | 检查 RSSI (Received Signal Strength Indicator, 接收信号强度)、切换 codec 降码率 |
 | **通话对端听不清** | mSBC 协商失败回退 CVSD | 检查 HFP 版本、eSCO 参数 |
-| **左右耳不同步** | TWS 转发延迟 | 升级 LE Audio Multi-Stream |
-| **连接后无声** | A2DP codec 协商失败 | 检查 btsnoop HCI log |
+| **左右耳不同步** | TWS (True Wireless Stereo) 转发延迟 | 升级 LE Audio Multi-Stream |
+| **连接后无声** | A2DP codec 协商失败 | 检查 btsnoop HCI (Host Controller Interface) log |
 | **音质明显差** | 回退到 SBC 低码率 | 检查 codec 协商结果 |
 | **延迟高 (游戏)** | 使用了高延迟 codec | 切换 aptX Adaptive/LE Audio |
 

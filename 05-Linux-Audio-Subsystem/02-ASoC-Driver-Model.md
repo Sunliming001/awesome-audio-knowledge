@@ -4,7 +4,7 @@ ASoC 层的目标是将音频驱动标准化。本章解析 ASoC 如何通过声
 
 ---
 
-## 1. DAPM：动态音频电源管理
+## 1. DAPM (Dynamic Audio Power Management)：动态音频电源管理
 
 DAPM 是 ASoC 最精妙的设计。它将声卡中的每个电路块抽象为 **Widget**。
 
@@ -149,7 +149,7 @@ graph LR
 
 *   **FE**：提供 PCM 设备节点给上层 (AudioFlinger/tinyplay)
 *   **BE**：对接物理硬件 (I2S/TDM/SlimBus)
-*   **DPCM (Dynamic PCM)**：允许运行时动态切换 FE 到 BE 的映射关系
+*   **DPCM (Dynamic PCM, 动态 PCM 路由)**：允许运行时动态切换 FE 到 BE 的映射关系
 
 ---
 

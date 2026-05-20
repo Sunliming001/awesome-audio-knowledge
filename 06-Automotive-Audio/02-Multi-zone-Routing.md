@@ -307,7 +307,7 @@ class CarAudioDynamicRouting {
 | 声音后移 | HMI 拖拽声场中心 | Fade/Balance 权重变化 |
 | 蓝牙耳机连接 | 后排连接 BT 耳机 | Zone 输出从 Bus 切到 BT Device |
 | 多屏投屏 | 视频 Cast 到后排 | App UID 重新映射到后排 Zone |
-| OTA 播报 | 全车通知 | 临时切换到所有 Zone 并行输出 |
+| OTA (Over-The-Air, 空中升级) 播报 | 全车通知 | 临时切换到所有 Zone 并行输出 |
 
 ### 5.3 路由切换时序
 

@@ -139,7 +139,7 @@ A2B 菊花链 (Daisy-Chain):
 |:---|:---|:---|:---|:---|:---|
 | **TAS6424-Q1** | TI | 4 | 75W (4Ω) | 无 (需外部) | 标准功放 |
 | **TAS6584-Q1** | TI | 8 | 40W | 有 (Smart Amp) | 中端多通道 |
-| **FDA903D** | TI | 12 | 100W (2Ω) | 无 | 高端多通道 |
+| **FDA903D** (Fully Differential Amplifier) | TI | 12 | 100W (2Ω) | 无 | 高端多通道 |
 | **SAF775x** | NXP | 12 | 外接 | 有 (Accucore DSP) | 高端数字功放 |
 | **ADAU1452** | ADI | - | - | 有 (SigmaDSP) | 纯 DSP 处理 |
 | **CS47L90** | Cirrus | - | - | 有 | Codec + DSP |

@@ -8,7 +8,7 @@
 
 ### 1.1 Biquad 滤波器 (核心构建块)
 
-几乎所有数字 PEQ 都由 Biquad (双二阶 IIR) 滤波器级联而成：
+几乎所有数字 PEQ 都由 Biquad (双二阶 IIR, Infinite Impulse Response, 无限脉冲响应) 滤波器级联而成：
 
 $$y[n] = b_0x[n] + b_1x[n-1] + b_2x[n-2] - a_1y[n-1] - a_2y[n-2]$$
 
@@ -66,7 +66,7 @@ def peaking_eq_coeffs(fc, gain_db, Q, fs):
 
 ```
 典型 10-Band PEQ (手机扬声器校准):
-  Band 1: HPF    @ 100Hz,  Order 2 (去除振动噪声)
+  Band 1: HPF (High-Pass Filter, 高通滤波器) @ 100Hz,  Order 2 (去除振动噪声)
   Band 2: Peak   @ 200Hz,  Gain +3dB,  Q=1.5
   Band 3: Peak   @ 500Hz,  Gain -2dB,  Q=2.0
   Band 4: Peak   @ 1kHz,   Gain +1dB,  Q=1.0
@@ -75,7 +75,7 @@ def peaking_eq_coeffs(fc, gain_db, Q, fs):
   Band 7: Peak   @ 6kHz,   Gain +2dB,  Q=2.5
   Band 8: Peak   @ 8kHz,   Gain -3dB,  Q=3.0
   Band 9: Peak   @ 12kHz,  Gain +1dB,  Q=2.0
-  Band 10: LPF   @ 18kHz,  Order 2 (抗混叠)
+  Band 10: LPF (Low-Pass Filter, 低通滤波器) @ 18kHz,  Order 2 (抗混叠)
 
 总延迟: 近似零 (IIR 滤波器, < 1 sample)
 计算量: 10 × 5 MAC/sample = 50 MAC/sample

@@ -202,7 +202,7 @@ spatializer.addOnHeadTrackerAvailableListener(executor,
 ### 8.1 卷积实现
 
 ```
-HRTF 渲染的核心 = FIR 滤波器卷积:
+HRTF 渲染的核心 = FIR (Finite Impulse Response, 有限脉冲响应) 滤波器卷积:
 
   HRTF 滤波器长度: 128-512 tap (典型 256 @ 48kHz ≈ 5.3ms)
   

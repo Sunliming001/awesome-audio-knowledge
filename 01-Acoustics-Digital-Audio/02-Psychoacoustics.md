@@ -35,7 +35,7 @@
 | **痛阈** | ~120 dB SPL | 持续暴露可造成永久损伤 |
 | **动态范围** | ~120 dB | 从听阈到痛阈 |
 | **时间分辨率** | ~2ms | 可分辨的最小时间间隔 |
-| **频率分辨率 (JND)** | ~0.3% (1kHz) | 可分辨的最小频率差 |
+| **频率分辨率 (JND, Just Noticeable Difference)** | ~0.3% (1kHz) | 可分辨的最小频率差 |
 
 ### 1.3 响度 (Loudness)
 
@@ -137,7 +137,7 @@
   Mel 尺度 (语音识别常用):
     m(Mel) = 2595 × log₁₀(1 + f/700)
     
-  ERB (Equivalent Rectangular Bandwidth):
+  ERB (Equivalent Rectangular Bandwidth, 等效矩形带宽):
     ERB(f) = 24.7 × (4.37 × f/1000 + 1)
 ```
 
@@ -173,9 +173,9 @@
 
 | 线索 | 有效频段 | 原理 | 最大值 |
 |:---|:---|:---|:---|
-| **ITD** (双耳时差) | < 1.5kHz | 声波到达两耳的时间差 | ~690 µs (90°方位) |
-| **ILD** (双耳级差) | > 1.5kHz | 头部阴影效应导致的强度差 | ~20 dB (高频) |
-| **HRTF** (头相关传输函数) | 全频段 | 耳廓/头/肩对声音的滤波 | 个体差异大 |
+| **ITD** (Interaural Time Difference, 双耳时间差) | < 1.5kHz | 声波到达两耳的时间差 | ~690 µs (90°方位) |
+| **ILD** (Interaural Level Difference, 双耳级差) | > 1.5kHz | 头部阴影效应导致的强度差 | ~20 dB (高频) |
+| **HRTF** (Head-Related Transfer Function, 头相关传输函数) | 全频段 | 耳廓/头/肩对声音的滤波 | 个体差异大 |
 
 ```
 双耳定位 — 频率与线索的关系:
@@ -216,9 +216,9 @@ HRTF 提供的额外定位信息:
     - 个体差异大 → 通用 HRTF 会降低定位精度
     
   商业 HRTF 数据库:
-    - CIPIC (UC Davis)
+    - CIPIC (Center for Image Processing and Integrated Computing, UC Davis)
     - LISTEN (IRCAM)
-    - MIT KEMAR
+    - MIT KEMAR (Knowles Electronics Manikin for Acoustic Research)
 ```
 
 ---
@@ -229,7 +229,7 @@ HRTF 提供的额外定位信息:
 
 ```mermaid
 graph TD
-    PCM["PCM 输入"] --> MDCT["MDCT 变换<br/>(时域→频域)"]
+    PCM["PCM 输入"] --> MDCT["MDCT 变换<br/>(Modified Discrete Cosine Transform, 改进离散余弦变换)<br/>(时域→频域)"]
     PCM --> PSY["心理声学模型"]
     
     PSY --> MASK["计算掩蔽阈值<br/>(每个频带)"]

@@ -140,7 +140,7 @@ QNX ↔ Android 音频通信:
     QNX Host 暴露 virtio-snd 设备给 Android GVM
     Android Audio HAL → virtio frontend → QNX backend → 硬件
     
-  方式 3: 共享内存 + IPC
+  方式 3: 共享内存 + IPC (Inter-Process Communication, 进程间通信)
     用于控制信令 (音量/路由切换)
     不直接传输 PCM 数据
 ```

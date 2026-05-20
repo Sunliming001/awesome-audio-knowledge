@@ -353,7 +353,7 @@ Buffer 与延迟的关系:
   典型配置:
     Normal Track:   Buffer = 4 × period = 4 × 240 = 960 frames = 20ms
     Fast Track:     Buffer = 2 × period = 2 × 128 = 256 frames ≈ 5ms
-    AAudio MMAP:    Buffer = 1-2 × period ≈ 128 frames ≈ 2.67ms
+    AAudio MMAP (Memory-Mapped):    Buffer = 1-2 × period ≈ 128 frames ≈ 2.67ms
     Deep Buffer:    Buffer = 4 × 1920 = 7680 frames = 160ms (省电)
 ```
 

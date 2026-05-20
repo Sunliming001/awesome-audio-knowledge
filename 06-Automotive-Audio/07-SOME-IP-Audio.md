@@ -94,12 +94,12 @@ SOME/IP 协议栈:
   │ 方案           │ SOME/IP         │ AVB/TSN       │ Raw UDP        │
   ├────────────────┼─────────────────┼───────────────┼────────────────┤
   │ 标准化         │ AUTOSAR         │ IEEE 802.1    │ 无             │
-  │ 服务发现       │ ✅ SOME/IP-SD   │ ✅ gPTP+MSRP  │ ❌ 静态配置    │
+  │ 服务发现       │ ✅ SOME/IP-SD   │ ✅ gPTP+MSRP (Multiple Stream Reservation Protocol)  │ ❌ 静态配置    │
   │ QoS 保证       │ 应用层保证      │ 网络层保证    │ 无             │
   │ 时间同步       │ 无原生支持      │ ✅ gPTP (ns级)│ 无             │
   │ 延迟           │ ~5-20ms         │ <2ms          │ ~1-5ms         │
   │ 抖动           │ 中等            │ 极低 (确定性) │ 不可控         │
-  │ 带宽预留       │ 无              │ ✅ SRP/CBS    │ 无             │
+  │ 带宽预留       │ 无              │ ✅ SRP (Stream Reservation Protocol)/CBS    │ 无             │
   │ 生态兼容       │ AUTOSAR AP/CP   │ 专业 AV 领域  │ 定制方案       │
   │ 适用场景       │ 信息娱乐音频    │ 专业/安全音频  │ 简单点对点     │
   │ 实际采用       │ 最广泛          │ 高端车型      │ 少             │
@@ -114,7 +114,7 @@ SOME/IP 协议栈:
 ### 3.2 SOME/IP 音频服务设计
 
 ```
-典型 SOME/IP 音频服务接口定义 (FIDL/ARXML):
+典型 SOME/IP 音频服务接口定义 (FIDL, Franca Interface Definition Language / ARXML, AUTOSAR XML):
 
   Service: AudioStreamService
     Service ID: 0x1001
@@ -235,9 +235,9 @@ SOME/IP + AVB/TSN 混合架构 (高端车型):
   
   TSN 关键特性:
     gPTP (802.1AS)  → 全网时钟同步 (<1µs 精度)
-    CBS (802.1Qav)  → 信用调度, 带宽预留
-    TAS (802.1Qbv)  → 时间感知调度, 门控队列
-    FRER (802.1CB)  → 帧冗余, 容错
+    CBS (Credit-Based Shaper, 802.1Qav)  → 信用调度, 带宽预留
+    TAS (Time-Aware Shaper, 802.1Qbv)  → 时间感知调度, 门控队列
+    FRER (Frame Replication and Elimination for Redundancy, 802.1CB)  → 帧冗余, 容错
 
   AUTOSAR AP 集成:
     ara::com → SOME/IP binding → 音频服务

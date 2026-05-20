@@ -54,7 +54,7 @@ graph TD
     subgraph SM8650 ["Snapdragon 8 Gen 3 SoC"]
         CPU["Kryo CPU<br/>(8 核)"]
         ADSP["Hexagon ADSP<br/>(AudioReach SPF)"]
-        CDSP["Hexagon cDSP<br/>(计算 DSP)"]
+        CDSP["Hexagon cDSP (Compute DSP)<br/>(计算 DSP)"]
         LPASS["LPASS Island<br/>(低功耗音频)"]
         SWR["SoundWire Master<br/>(x2 总线)"]
     end
@@ -62,7 +62,7 @@ graph TD
     subgraph Codec ["WCD9395 Codec"]
         DAC["DAC x4<br/>(32bit/384kHz)"]
         ADC["ADC x8<br/>(24bit/192kHz)"]
-        MBHC["MBHC<br/>(耳机检测)"]
+        MBHC["MBHC (Multi-Button Headset Controller)<br/>(耳机检测)"]
     end
     
     subgraph SmartPA_Block ["SmartPA"]

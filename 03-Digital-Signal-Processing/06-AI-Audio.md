@@ -340,9 +340,159 @@ KWD 模型要求:
 
 ---
 
-## 8. AI 音频的工程挑战
+## 8. Whisper 语音识别实战
 
-### 8.1 实时性保障
+### 8.1 Whisper 模型架构
+
+```
+OpenAI Whisper (2022):
+  架构: Encoder-Decoder Transformer
+  
+  输入: 30 秒音频 → 80-dim Log-Mel 频谱图 (80×3000)
+    ↓
+  Encoder: N 层 Transformer (多头自注意力 + FFN)
+    → 音频特征表示
+    ↓
+  Decoder: N 层 Transformer (交叉注意力 + 因果自注意力)
+    → 自回归生成文本 Token
+    ↓
+  输出: 文本 + 时间戳 + 语言标识
+
+  模型规模:
+  ┌────────────┬──────────┬──────────┬──────────────┐
+  │ 模型       │ 参数量   │ 模型大小 │ 英语 WER     │
+  ├────────────┼──────────┼──────────┼──────────────┤
+  │ tiny       │ 39M      │ ~75MB    │ ~7.6%        │
+  │ base       │ 74M      │ ~142MB   │ ~5.0%        │
+  │ small      │ 244M     │ ~466MB   │ ~3.4%        │
+  │ medium     │ 769M     │ ~1.5GB   │ ~2.9%        │
+  │ large-v3   │ 1550M    │ ~3.1GB   │ ~2.0%        │
+  │ turbo      │ 809M     │ ~1.6GB   │ ~2.3%        │
+  └────────────┴──────────┴──────────┴──────────────┘
+
+  核心能力:
+    - 多语言: 支持 99 种语言
+    - 多任务: 语音识别、翻译、语言检测、时间戳
+    - 鲁棒性: 对噪声/口音/方言容忍度极高
+    - 零样本: 无需针对特定领域 fine-tune
+```
+
+### 8.2 Whisper 端侧部署
+
+```
+端侧 Whisper 部署方案:
+
+  方案 1: whisper.cpp (C/C++ 推理)
+    平台: Android/iOS/嵌入式
+    模型: tiny/base (GGML 量化格式)
+    性能: tiny INT8 → ARM A78 约 1.5x 实时
+    优势: 纯 C++, 无外部依赖
+
+  方案 2: ONNX Runtime + 量化
+    模型: FP16/INT8 ONNX 格式
+    平台: Android (NNAPI), iOS (Core ML)
+    性能: base FP16 → 骁龙8Gen3 NPU 约 3x 实时
+
+  方案 3: 高通 QNN 部署
+    模型: INT8 量化 → HTP/HVX 推理
+    适合: 实时转录 (会议/字幕)
+    延迟: ~500ms per 30s chunk (tiny)
+
+  局限性:
+    ❌ 非流式: 需要完整 30s 输入才能推理
+    ❌ 大模型不适合端侧 (medium/large)
+    ⚠️ 中文识别效果弱于英语 (需 fine-tune)
+    
+  优化方向:
+    - Distil-Whisper: 蒸馏小模型, 6x 加速
+    - Faster-Whisper: CTranslate2 后端, 4x 加速
+    - Whisper Streaming: 分块输入实现伪流式
+```
+
+---
+
+## 9. 语音转换与变声技术 (Voice Conversion)
+
+### 9.1 技术概览
+
+```
+语音转换 (Voice Conversion, VC):
+  目标: 将源说话人的语音转换为目标说话人的音色, 保持内容不变
+
+  核心解耦:
+    语音信号 = 内容 (Content) + 音色 (Speaker) + 韵律 (Prosody)
+    VC 只改变音色, 保持内容和韵律
+
+  应用场景:
+    - 实时变声 (直播/游戏)
+    - 语音隐私保护
+    - 影视配音 (跨语言配音)
+    - TTS 音色克隆
+    - 歌声转换 (AI 翻唱)
+```
+
+### 9.2 主流模型
+
+```
+Voice Conversion 模型演进:
+
+  1. RVC (Retrieval-based Voice Conversion)
+     架构: ContentVec (内容提取) + 说话人嵌入 + HiFi-GAN (声码器)
+     训练: 仅需目标说话人 10-30 分钟音频
+     推理: ~0.5 RTF (GPU), 近实时
+     特点: 训练快 (20-40分钟/GPU), 社区生态完善
+     开源: github.com/RVC-Project/Retrieval-based-Voice-Conversion
+
+  2. So-VITS-SVC (Singing Voice Conversion)
+     架构: VITS (端到端 TTS) + SoftVC 内容提取
+     训练: 需要目标说话人干净歌声/语音
+     特点: 歌声转换效果突出, 支持 pitch 变换
+     开源: github.com/svc-develop-team/so-vits-svc
+
+  3. OpenVoice (MyShell)
+     架构: Base TTS + Tone Color Converter
+     特点: 零样本音色克隆, 跨语言, 情感控制
+     推理: 约 1.5x 实时 (GPU)
+
+  4. GPT-SoVITS
+     架构: GPT (文本→语义token) + SoVITS (语义→音频)
+     训练: 仅需 1 分钟参考音频
+     特点: Few-shot 克隆, 中文效果好
+
+  实时变声部署:
+    延迟要求: < 50ms (否则明显感知)
+    方案: RVC + GPU 推理 / NPU 加速
+    帧长: 10-20ms 流式处理
+    缓冲: 双缓冲 ping-pong
+```
+
+### 9.3 安全与伦理
+
+```
+AI 语音技术的安全考量:
+
+  深度伪造 (Deepfake Voice) 风险:
+    - 语音钓鱼 (Vishing): 模仿高管/家人声音
+    - 身份冒充: 绕过声纹验证系统
+    - 虚假证据: 伪造录音
+
+  防御与检测:
+    - 声纹活体检测 (Liveness Detection)
+    - AI 生成音频检测 (ASVspoof Challenge)
+    - 音频水印 (AudioSeal by Meta)
+    - 数字签名 (C2PA 内容认证)
+
+  行业规范:
+    - 标注 AI 生成内容 (EU AI Act)
+    - 获取声音权利人授权
+    - 禁止用于诈骗/冒充
+```
+
+---
+
+## 10. AI 音频的工程挑战
+
+### 10.1 实时性保障
 
 ```
 实时 AI 音频的约束:
@@ -363,7 +513,7 @@ KWD 模型要求:
     Attention: 有限历史窗口 (Chunk-based)
 ```
 
-### 8.2 常见问题与解决
+### 10.2 常见问题与解决
 
 | 问题 | 原因 | 解决方案 |
 |:---|:---|:---|
@@ -375,7 +525,7 @@ KWD 模型要求:
 
 ---
 
-## 9. 关键参考 (References)
+## 11. 关键参考 (References)
 
 1.  [RNNoise - Xiph.org](https://jmvalin.ca/demo/rnnoise/)
 2.  [Microsoft DNS Challenge](https://github.com/microsoft/DNS-Challenge)

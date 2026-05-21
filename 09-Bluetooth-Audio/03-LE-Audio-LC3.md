@@ -57,7 +57,67 @@ LC3 = LE Audio 的标准编解码器 (Bluetooth SIG 定义):
       + PLC (Packet Loss Concealment) 丢包补偿
 ```
 
-### 2.2 LC3plus (增强版)
+### 2.2 LC3 编码器内部流程详解
+
+```
+LC3 编码器处理管线 (每帧 7.5ms 或 10ms):
+
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Step 1: 预处理                                              │
+  │    输入 PCM (16/24/32-bit) → 浮点归一化                      │
+  │    高通滤波 (去除 DC 偏移, 截止 ~20Hz)                       │
+  └──────────┬───────────────────────────────────────────────────┘
+             ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Step 2: MDCT 变换 (Modified Discrete Cosine Transform)      │
+  │    时域 PCM → 频域系数                                       │
+  │    窗函数: 正弦窗 (Sine Window), 50% 重叠                    │
+  │    10ms@48kHz: 480 样本 → 240 个 MDCT 系数                  │
+  │    7.5ms@48kHz: 360 样本 → 180 个 MDCT 系数                 │
+  └──────────┬───────────────────────────────────────────────────┘
+             ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Step 3: 频谱分析与量化                                       │
+  │    3a. 带宽检测: 自动检测有效频谱范围                          │
+  │    3b. 时域/频域攻击检测 (Transient Detection)                │
+  │        → 瞬态帧使用短窗 (提高时间分辨率)                      │
+  │    3c. SNS (Spectral Noise Shaping):                         │
+  │        → 根据掩蔽阈值对量化噪声进行频域整形                   │
+  │        → 类似传统编码中的心理声学模型                         │
+  │    3d. 频谱量化:                                              │
+  │        → 均匀标量量化 + 全局增益控制                          │
+  │        → 比特分配由目标码率决定                               │
+  └──────────┬───────────────────────────────────────────────────┘
+             ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Step 4: 熵编码 (Arithmetic Coding)                          │
+  │    量化系数 → 算术编码 → 压缩比特流                          │
+  │    残余比特 → 噪声填充 (Noise Filling) 参数                  │
+  └──────────┬───────────────────────────────────────────────────┘
+             ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Step 5: 比特流封装                                          │
+  │    编码参数 + 压缩频谱 → LC3 帧                              │
+  │    帧大小 = 目标码率 × 帧长 / 8 (bytes)                      │
+  │    例: 160kbps × 10ms = 200 bytes/帧                         │
+  └──────────────────────────────────────────────────────────────┘
+```
+
+```
+LC3 解码器 (编码器的镜像操作):
+
+  比特流 → 算术解码 → 反量化 → 噪声填充
+    → SNS 反整形 → IMDCT → 重叠相加 → PCM 输出
+
+  PLC (Packet Loss Concealment) 丢包补偿:
+    当 BLE 包丢失时:
+      1. 用前一帧频谱做平滑衰减 (Fade-out)
+      2. 噪声填充保持信号连续性
+      3. 恢复后 Fade-in 平滑过渡
+      4. 连续丢包 > 4帧 → 静音输出 (避免伪信号)
+```
+
+### 2.3 LC3plus (增强版)
 
 ```
 LC3plus = Fraunhofer 扩展版本 (超出 BT SIG 标准):
@@ -143,6 +203,115 @@ LE Audio 的数据传输使用 ISO (Isochronous) 通道:
       - 健身房共享音乐
       - 会议室同声传译
       - 博物馆语音导览
+```
+
+### 4.2 CIS 建立时序详解
+
+```mermaid
+sequenceDiagram
+    participant Phone as 手机 (Central)
+    participant L as 左耳机 (Peripheral)
+    participant R as 右耳机 (Peripheral)
+
+    Note over Phone,R: 阶段1: BLE 连接 + GATT 服务发现
+    Phone->>L: BLE Connect
+    Phone->>R: BLE Connect
+    Phone->>L: Discover PACS (能力协商)
+    Phone->>R: Discover PACS
+    L-->>Phone: Supported: LC3 48kHz/10ms/96kbps
+    R-->>Phone: Supported: LC3 48kHz/10ms/96kbps
+
+    Note over Phone,R: 阶段2: ASE 状态机 (Audio Stream Endpoint)
+    Phone->>L: ASCS: Config Codec (LC3, 48kHz, 10ms)
+    Phone->>R: ASCS: Config Codec
+    Phone->>L: ASCS: Config QoS (SDU=120B, RTN=2, Latency=10ms)
+    Phone->>R: ASCS: Config QoS
+
+    Note over Phone,R: 阶段3: CIG/CIS 创建
+    Phone->>Phone: HCI_LE_Set_CIG_Parameters
+    Phone->>L: HCI_LE_Create_CIS (CIS_0)
+    Phone->>R: HCI_LE_Create_CIS (CIS_1)
+    L-->>Phone: CIS_0 Established
+    R-->>Phone: CIS_1 Established
+
+    Note over Phone,R: 阶段4: 开始音频流
+    Phone->>L: ASCS: Enable
+    Phone->>R: ASCS: Enable
+    Phone->>L: ASCS: Receiver Start Ready
+    Phone->>R: ASCS: Receiver Start Ready
+    Note over Phone,R: LC3 音频数据流开始传输
+```
+
+```
+CIS QoS 参数详解:
+
+  SDU (Service Data Unit):  每个 ISO 包的有效载荷
+    = LC3 帧大小 = 码率 × 帧长 / 8
+    例: 96kbps × 10ms / 8 = 120 bytes
+
+  SDU_Interval:  SDU 发送间隔 = 帧长 (7.5ms 或 10ms)
+
+  RTN (Retransmission Number):  重传次数
+    RTN=0: 无重传, 最低延迟
+    RTN=2: 最多 2 次重传, 平衡可靠性和延迟
+    RTN=5: 高可靠, 但延迟增大
+
+  Max_Transport_Latency:  最大传输延迟
+    音乐播放: 60-100ms (容忍较高)
+    游戏模式: 15-30ms (低延迟优先)
+    语音通话: 40-60ms
+
+  PHY:  物理层速率
+    1M PHY: 兼容性好, 范围远
+    2M PHY: 速率翻倍, 减少空口占用时间, 降低功耗
+```
+
+### 4.3 BIS 广播时序与 Auracast 部署
+
+```
+BIS 广播建立流程:
+
+  发送端 (Broadcast Source):
+    1. 创建 BIG (Broadcast Isochronous Group)
+       HCI_LE_Create_BIG
+       参数: BIS 数量, SDU 大小, SDU_Interval, Packing, PHY
+    2. 广播 Extended Advertising + Periodic Advertising
+       包含: Broadcast Audio Announcement (BAA)
+       内容: 编码参数, 流名称, 语言, 加密信息
+    3. 开始发送 BIS 数据流 (无需连接)
+
+  接收端 (Broadcast Sink):
+    1. 扫描 Extended Advertising
+    2. 同步 Periodic Advertising
+    3. 解析 Broadcast Audio Announcement
+       → 显示可用广播源列表
+    4. 用户选择 → Sync to BIG
+       HCI_LE_BIG_Create_Sync
+    5. 接收 BIS 数据 → LC3 解码 → 播放
+
+Auracast 实际部署场景与设计:
+
+  场景 1 - 机场登机口广播:
+    发送端: 机场广播设备 (BIS, LC3 48kHz/64kbps)
+    接收端: 旅客耳机/助听器
+    特点: 无需配对, 无限人数, 可多语言并行广播
+
+  场景 2 - 健身房共享音乐:
+    发送端: 健身房音响主机 (BIS, LC3 48kHz/96kbps)
+    接收端: 会员耳机
+    特点: 替代传统大音箱, 每人自控音量
+
+  场景 3 - 多语言同声传译:
+    发送端: 会议系统 (BIG 含多个 BIS)
+      BIS_0: 中文通道
+      BIS_1: 英文通道
+      BIS_2: 日文通道
+    接收端: 选择对应语言 BIS 收听
+
+  加密与访问控制:
+    Broadcast Code: 16 字节密码, AES-CCM 加密
+    公开广播: 无需密码 (机场/博物馆)
+    私有广播: 需输入密码 (健身房 VIP)
 ```
 
 ---

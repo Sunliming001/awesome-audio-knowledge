@@ -229,7 +229,62 @@ graph TD
 
 ---
 
-## 7. 其他重要标准
+## 7. 车规音频 EMC 与可靠性标准
+
+### 7.1 车载 EMC 标准
+
+| 标准 | 内容 | 测试项 | 适用 |
+|:---|:---|:---|:---|
+| **CISPR 25** | 车载设备辐射/传导发射限值 | 传导发射 (150kHz-30MHz)、辐射发射 (30MHz-1GHz) | 所有车载电子设备 |
+| **ISO 11452** | 车载设备抗扰度 | 大电流注入 (BCI)、散装电流注入、辐射抗扰 | 车载音频主机/功放 |
+| **ISO 7637** | 电源瞬态抗扰度 | Load Dump (最高 40V)、瞬态脉冲 | 功放电源设计 |
+| **ISO 16750** | 环境可靠性 | 温度 (-40~+85°C)、湿度、振动、盐雾 | 车载全部件 |
+
+### 7.2 车载音频元器件认证
+
+| 认证 | 适用 | 要求 |
+|:---|:---|:---|
+| **AEC-Q100** | IC 芯片 (Codec/DSP/功放) | 温度循环、HTOL、ESD 等 |
+| **AEC-Q103** | MEMS 器件 (麦克风) | 振动、跌落、高温存储 |
+| **AEC-Q104** | 多芯片模块 | 组合应力测试 |
+| **IATF 16949** | 供应商质量体系 | 汽车行业质量管理体系认证 |
+
+---
+
+## 8. Hi-Res Audio 认证
+
+### 8.1 日本音频协会 (JAS) Hi-Res 认证
+
+```
+Hi-Res Audio 定义 (Japan Audio Society):
+  "能够再现超越 CD 品质音频的设备/内容"
+  
+  CD 规格: 16bit / 44.1kHz
+  Hi-Res 最低要求:
+    播放设备: 支持 96kHz/24bit 或更高
+    录音设备: 支持 96kHz/24bit 或更高
+    耳机/扬声器: 频率响应 ≥ 40kHz
+
+Hi-Res Audio Wireless (无线 Hi-Res):
+  2019 年新增标准
+  要求: 蓝牙编解码支持 96kHz/24bit
+  认证 Codec: LDAC, aptX HD, aptX Adaptive, LHDC
+  注: SBC/AAC 不符合 Hi-Res Wireless 标准
+```
+
+### 8.2 各平台 Hi-Res 技术要求
+
+| 平台/认证 | DAC 要求 | 采样率 | 位深 | 编解码格式 |
+|:---|:---|:---|:---|:---|
+| **JAS Hi-Res** | SNR > 100dB | ≥ 96kHz | ≥ 24bit | FLAC/ALAC/DSD/WAV |
+| **Hi-Res Wireless** | - | ≥ 96kHz (无线传输) | ≥ 24bit | LDAC/aptX HD |
+| **MQA (已停运)** | 支持 MQA 解码 | 原始可达 384kHz | 24bit | MQA 折叠编码 |
+| **Apple Lossless** | - | 最高 192kHz | 24bit | ALAC |
+| **Dolby Atmos Music** | 空间音频渲染 | 48kHz | 24bit | EC-3/AC-4 |
+
+---
+
+## 9. 其他重要标准
 
 | 标准 | 领域 | 内容 |
 |:---|:---|:---|
@@ -240,10 +295,13 @@ graph TD
 | **ETSI TS 103 224** | eCall | 紧急呼叫音频要求 |
 | **AES67** | 专业音频网络 | IP 音频互操作标准 |
 | **Bluetooth SIG** | 蓝牙音频 | A2DP/HFP/LE Audio 认证 |
+| **3GPP TS 26.114** | IMS 多媒体 | VoLTE/VoNR 媒体处理要求 |
+| **3GPP TS 26.441** | EVS 编解码 | 增强语音服务 (9.6-128kbps) |
+| **ETSI EG 202 396-1** | 语音通信 | 背景噪声模拟 (办公/车载/街道) |
 
 ---
 
-## 8. 关键参考 (References)
+## 10. 关键参考 (References)
 
 1.  [ITU-T P.863: POLQA](https://www.itu.int/rec/T-REC-P.863)
 2.  [ITU-T P.1110: Wideband Hands-free Communication](https://www.itu.int/rec/T-REC-P.1110)

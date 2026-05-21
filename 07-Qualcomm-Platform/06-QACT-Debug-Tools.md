@@ -160,6 +160,54 @@ diag_socket_app &
 - Events: 系统事件
 ```
 
+### 3.5 QXDM 实战: 音频问题抓取示例
+
+```
+场景 1: ADSP Crash / SSR 分析
+
+  1. QXDM Message View 中过滤:
+     SSID = MSG_SSID_QDSP6, Level = FATAL + ERROR
+  
+  2. 典型 Crash 日志模式:
+     [timestamp] FATAL: Exception occurred in audio_pd
+     [timestamp] ERROR: Process audio_pd crashed, SSR triggered
+     [timestamp] ERROR: spf_svc: graph_close failed, result=0x80004003
+  
+  3. 定位关键信息:
+     → Exception PC (程序计数器) → 对应 CAPI 模块地址
+     → Thread ID → 确认是哪个拓扑线程
+     → 最后 10 条 MSG → 分析崩溃前操作
+  
+  4. 联合分析:
+     QXDM .isf + ADSP ramdump → 用 addr2line/crash 工具定位源码行
+
+场景 2: 音频无声问题定位
+
+  1. QXDM 过滤: "gpr" + "spf" + "graph"
+  
+  2. 正常流程日志:
+     [T1] gpr_send: APM_CMD_GRAPH_OPEN → graph_id=0x1001
+     [T2] gpr_send: APM_CMD_GRAPH_PREPARE → graph_id=0x1001
+     [T3] gpr_send: APM_CMD_GRAPH_START → graph_id=0x1001
+     [T4] data_cmd: WR_SH_MEM_EP → buf_addr=0xABCD, size=960
+  
+  3. 异常模式:
+     ❌ GRAPH_OPEN 无响应 → ADSP 加载问题
+     ❌ GRAPH_START 返回 error → 硬件配置错误
+     ❌ WR_SH_MEM 无数据 → HAL 层未送数据
+     ❌ 数据送入但无输出 → 查看 Codec/PA mixer 配置
+
+场景 3: 爆音 (Glitch) 定位
+
+  1. QXDM 过滤: "underrun" + "overrun" + "xrun"
+  2. 同时 logcat 过滤: AudioFlinger + AudioHAL
+  3. 对齐时间戳:
+     QXDM [T1] underrun detected, rd_offset=480, wr_offset=480
+     logcat [T1] AudioFlinger: underrun on track 0x1234
+     → 确认是 AP 侧数据下发不及时
+  4. 进一步: Perfetto trace 查看调度延迟
+```
+
 ---
 
 ## 4. QCAT (Qualcomm Crash Analysis Tool)
@@ -180,6 +228,30 @@ diag_socket_app &
 4. 定位异常时间点
 5. 查看该时间点前后的上下文日志
 6. 分析 root cause
+```
+
+### 4.3 QCAT 高级过滤技巧
+
+```
+常用过滤表达式:
+
+  按 SSID 过滤:
+    SSID == MSG_SSID_QDSP6              → 所有 ADSP 日志
+    SSID == MSG_SSID_QDSP6 && Level >= ERROR  → 仅 ADSP 错误
+
+  按关键字搜索:
+    Message contains "graph_open"        → 拓扑打开操作
+    Message contains "capi" && "error"   → CAPI 模块错误
+    Message contains "ssr"               → 子系统重启事件
+
+  按时间范围:
+    Timestamp >= T1 && Timestamp <= T2   → 截取问题发生窗口
+
+  多文件对比工作流:
+    1. 打开正常场景 .isf (baseline)
+    2. 打开异常场景 .isf (faulty)
+    3. 对齐时间轴 → 逐条对比
+    4. 找到首个分歧点 → 根因
 ```
 
 ---

@@ -207,9 +207,95 @@ AVB/TSN 协议栈:
 
 ---
 
-## 5. 车载麦克风系统
+## 5. 车载扬声器系统设计
 
-### 5.1 麦克风布局
+### 5.1 扬声器布局与分频设计
+
+```
+典型高端车载音响系统 (20+ 扬声器):
+
+  ┌─────────────────────────────────────────────────────┐
+  │                    天花板/顶棚                        │
+  │         ●(Atmos_FL)              ●(Atmos_FR)        │
+  │                   ●(Atmos_C)                        │
+  │         ●(Atmos_RL)              ●(Atmos_RR)        │
+  ├─────────────────────────────────────────────────────┤
+  │  A柱                                        A柱     │
+  │  ●(TW_FL)                            ●(TW_FR)      │  高音 (Tweeter)
+  │                                                     │
+  │  门板左前                            门板右前        │
+  │  ●(MID_FL)                           ●(MID_FR)     │  中音 (Midrange)
+  │  ●(WF_FL)                            ●(WF_FR)      │  低音 (Woofer)
+  │                                                     │
+  │  门板左后                            门板右后        │
+  │  ●(MID_RL)                           ●(MID_RR)     │
+  │  ●(WF_RL)                            ●(WF_RR)      │
+  │                                                     │
+  │                 后备箱/座椅下                         │
+  │              ●(SUB_L)  ●(SUB_R)                     │  超低音 (Subwoofer)
+  └─────────────────────────────────────────────────────┘
+
+分频点设计 (典型 3-Way + Sub):
+  Subwoofer:   20Hz - 80Hz   (4阶 Linkwitz-Riley)
+  Woofer:      80Hz - 500Hz
+  Midrange:    500Hz - 4kHz
+  Tweeter:     4kHz - 20kHz
+  Atmos 天棚:  200Hz - 16kHz (全频带)
+
+通道数需求:
+  入门级:  6-8 通道 (前2路+后2路+Sub)
+  中端:    12-16 通道 (3-Way 前后+Sub+中置)
+  高端:    20-30+ 通道 (3D 沉浸式 Dolby Atmos)
+```
+
+### 5.2 车载音频 Tier-1 供应商
+
+| 供应商 | 音频品牌合作 | 典型车型 | 方案特点 |
+|:---|:---|:---|:---|
+| **Harman (Samsung)** | JBL, Harman Kardon, Mark Levinson, Revel | 宝马/雷克萨斯/奇瑞/吉利 | 全栈方案：DSP+功放+扬声器+调音 |
+| **Bose** | Bose | 保时捷/凯迪拉克/雪佛兰/马自达 | 自研算法+ANC+PersonalSpace |
+| **Bang & Olufsen (B&O)** | B&O | 奥迪/兰博基尼/福特 | 铝制高音单元，视觉设计出众 |
+| **Burmester** | Burmester | 奔驰/保时捷 | 德系高端，3D 环绕声 |
+| **Dynaudio** | Dynaudio | 大众/沃尔沃 | 丹麦音质调校 |
+| **Focal** | Focal | 标致/雪铁龙/DS | 法系调音，Flax 亚麻振膜 |
+| **Sony** | Sony/360 Reality Audio | 本田/日产 | 360RA 空间音频 |
+| **DENSO TEN** | Fujitsu Ten/Eclipse | 丰田/雷克萨斯 | JDM 市场主力 |
+
+### 5.3 车载功放+DSP 完整方案
+
+```
+典型高端车载音频信号流:
+
+  音源 (HU/手机)
+    │
+    ▼
+  座舱 SoC (SA8295P)
+    ├── AAOS AudioFlinger → AudioControl HAL
+    ├── 内置 ADSP: 3A 算法 (AEC/NS/AGC)
+    │
+    ▼  I2S/TDM (8-24ch)
+  外部 DSP (ADAU1452 / SAF7751)
+    ├── PEQ (每通道 10-band)
+    ├── 分频器 (Crossover)
+    ├── 延迟对齐 (Time Alignment, 0-20ms)
+    ├── 空间音频渲染 (Dolby Atmos / DTS)
+    ├── DRC / Limiter (每通道)
+    │
+    ▼  I2S/TDM (12-30ch)
+  多通道功放阵列
+    ├── TAS6424 × 3 (12ch × 75W) → 门板/A柱
+    ├── TAS6584 × 1 (8ch × 40W)  → 天棚 Atmos
+    ├── FDA903D × 1 (2ch × 100W) → Subwoofer
+    │
+    ▼
+  扬声器阵列 (20-30 只)
+```
+
+---
+
+## 6. 车载麦克风系统
+
+### 6.1 麦克风布局
 
 ```
 典型麦克风部署 (6-12 个):
@@ -233,7 +319,7 @@ AVB/TSN 协议栈:
   RNC MIC:   路噪参考 (靠近悬架/轮拱)
 ```
 
-### 5.2 麦克风选型要求
+### 6.2 麦克风选型要求
 
 | 参数 | 车规要求 | 说明 |
 |:---|:---|:---|
@@ -246,9 +332,9 @@ AVB/TSN 协议栈:
 
 ---
 
-## 6. ANC/RNC 硬件要求
+## 7. ANC/RNC 硬件要求
 
-### 6.1 系统延迟预算
+### 7.1 系统延迟预算
 
 ```
 ANC/RNC 延迟预算 (必须 < 5ms):
@@ -266,7 +352,7 @@ ANC/RNC 延迟预算 (必须 < 5ms):
     高频 (> 1kHz) 完全无效
 ```
 
-### 6.2 加速度计部署
+### 7.2 加速度计部署
 
 | 位置 | 数量 | 传感方向 | 用途 |
 |:---|:---|:---|:---|
@@ -276,7 +362,7 @@ ANC/RNC 延迟预算 (必须 < 5ms):
 
 ---
 
-## 7. EMC 设计要点
+## 8. EMC 设计要点
 
 | 设计项 | 措施 | 标准 |
 |:---|:---|:---|
@@ -288,7 +374,7 @@ ANC/RNC 延迟预算 (必须 < 5ms):
 
 ---
 
-## 8. 关键参考 (References)
+## 9. 关键参考 (References)
 
 1.  [Analog Devices A2B Technology](https://www.analog.com/en/applications/technology/a2b-audio-bus.html)
 2.  [IEEE 802.1 AVB/TSN](https://www.ieee802.org/1/pages/avbridges.html)

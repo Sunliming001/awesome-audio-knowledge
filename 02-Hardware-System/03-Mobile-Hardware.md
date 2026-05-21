@@ -293,7 +293,65 @@ graph TD
 
 ---
 
-## 8. 关键参考 (References)
+## 8. 音频芯片供应商完整图谱
+
+### 8.1 Codec 芯片供应商
+
+| 供应商 | 代表型号 | 接口 | 定位 | 主要客户 |
+|:---|:---|:---|:---|:---|
+| **Qualcomm** | WCD9395, WCD9380, WCD937x | SoundWire | 手机 (高通平台专用) | 小米/OPPO/vivo/三星 |
+| **Cirrus Logic** | CS42L43, CS47L90 | SoundWire/I2S | 手机/PC (Apple 生态) | Apple iPhone/MacBook |
+| **Realtek** | ALC5682, ALC1220 | I2S/SPI | PC/IoT/USB-C 耳机 | 联想/华硕/Dell |
+| **Texas Instruments** | PCM512x, TLV320AIC | I2S | 嵌入式/树莓派/IoT | 工业/消费 |
+| **Asahi Kasei (AKM)** | AK4458, AK4493, AK4377 | I2S | Hi-Fi DAC/车载 | Sony/LG/高端播放器 |
+| **ESS Technology** | ES9038, ES9219 | I2S | 发烧级 DAC | vivo (X 系列)/FiiO |
+| **MediaTek** | MT6681, MT6359 (集成 PMIC) | I2S/TDM | 手机 (MTK 平台内置) | OPPO/vivo/小米 |
+
+### 8.2 SmartPA 芯片供应商
+
+| 供应商 | 代表型号 | 接口 | 特色 | 主要客户 |
+|:---|:---|:---|:---|:---|
+| **Cirrus Logic** | CS35L45, CS35L41 | I2S + I2C | Haptics 支持, 低功耗 | Apple/Samsung/Google |
+| **Qualcomm (WSA)** | WSA8845H, WSA8835 | SoundWire | 高通平台原生集成 | 小米/OPPO/vivo |
+| **NXP → Goodix** | TFA9874, TFA9878 | I2S + I2C | 双通道, IV-Sense EQ | 华为/三星 |
+| **Maxim (ADI)** | MAX98390, MAX98396 | I2S + I2C | 集成 DSP, 热保护 | Google Pixel/联想 |
+| **艾为电子 (Awinic)** | AW882xx, AW883xx | I2S + I2C | 国产, 性价比 | 小米/荣耀/传音 |
+| **富芮坤 (Fortemedia)** | FS19xx | I2S + I2C | 国产, 车规认证 | 车载 Tier 1 |
+
+### 8.3 典型手机音频方案
+
+```
+旗舰手机音频硬件方案对比:
+
+┌──────────────┬──────────────┬─────────────┬──────────────┬──────────────┐
+│ 手机         │ SoC          │ Codec       │ SmartPA      │ MEMS MIC     │
+├──────────────┼──────────────┼─────────────┼──────────────┼──────────────┤
+│ iPhone 15 Pro│ A17 Pro      │ Cirrus      │ CS35L45 ×2   │ Knowles ×3   │
+│              │              │ CS42L43     │              │              │
+├──────────────┼──────────────┼─────────────┼──────────────┼──────────────┤
+│ 小米 14 Ultra│ SM8650       │ WCD9395     │ CS35L45 ×2   │ Knowles ×4   │
+│              │ (骁龙8Gen3)  │ (SoundWire) │ (定制调音)   │              │
+├──────────────┼──────────────┼─────────────┼──────────────┼──────────────┤
+│ Samsung S24U │ SM8650       │ WCD9395     │ CS35L41 ×2   │ Knowles ×3   │
+│              │ /Exynos 2400 │ /集成 Codec │ /AW882xx     │              │
+├──────────────┼──────────────┼─────────────┼──────────────┼──────────────┤
+│ OPPO Find X7 │ Dimensity    │ MT6681      │ CS35L45 ×2   │ Knowles ×3   │
+│              │ 9300         │ (集成)      │              │              │
+├──────────────┼──────────────┼─────────────┼──────────────┼──────────────┤
+│ 华为 Pura 70 │ 麒麟 9010   │ 自研 Codec  │ 自研/NXP     │ Goertek ×4   │
+│              │              │             │ TFA9878      │              │
+├──────────────┼──────────────┼─────────────┼──────────────┼──────────────┤
+│ vivo X100Pro │ Dimensity    │ MT6681 +    │ CS35L45 ×2   │ Knowles ×3   │
+│              │ 9300         │ CS43131     │              │              │
+│              │              │ (独立HiFi)  │              │              │
+└──────────────┴──────────────┴─────────────┴──────────────┴──────────────┘
+
+注: 具体型号可能因地区/批次/成本优化而变化
+```
+
+---
+
+## 9. 关键参考 (References)
 
 1.  [Qualcomm SM8650 Audio Subsystem](https://www.qualcomm.com/products/mobile/snapdragon/smartphones/snapdragon-8-series-mobile-platforms)
 2.  [WCD9395 Codec Datasheet](https://www.qualcomm.com/)

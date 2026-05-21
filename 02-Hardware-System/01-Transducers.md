@@ -16,7 +16,85 @@
 | **MEMS** (Micro-Electro-Mechanical Systems) | 微机械振膜+ASIC | -38 dBV | 50-20kHz | 1.8-3.3V | 智能手机/车载 |
 | **压电式** | 压电效应 | 低 | 窄带 | 无需 | 骨传导/加速度计 |
 
-### 1.2 MEMS 麦克风详解
+### 1.2 各类麦克风物理原理详解
+
+#### 动圈式 (Dynamic / Moving Coil)
+
+```
+原理: 电磁感应定律 (Faraday's Law)
+  声波 → 振膌振动 → 音圈在磁场中运动 → 产生感应电动势 (EMF)
+  
+  EMF = B × L × v
+    B: 磁通密度 (Tesla)
+    L: 音圈导线总长度 (m)
+    v: 音圈运动速度 (m/s)
+
+  结构:
+    永磁体 (钕铁硒/铕钴) → 提供恒定磁场
+    音圈 (铜线绕制) → 悬挂在磁场中
+    振膌 (聚酯所) → 与音圈粘合，接收声压
+
+  特点:
+    ✔ 无需外部供电、结构健壮、不易损坏
+    ✘ 灵敏度低、频响较窄、质量重
+```
+
+#### 电容式 (Condenser) & ECM
+
+```
+原理: 电容变化原理 (C = εA/d)
+  声波 → 振膌振动 → 极板间距 d 变化 → 电容 C 变化 → 电压变化
+  
+  “真”电容麦克风 (Large-Diaphragm Condenser):
+    需要外部 48V 幻象电源 (Phantom Power) 提供极化电压
+    振膌材料: 镜射金属薄膜 (6μm 厚度)
+    灵敏度极高 (-35dBV)，适合录音棚
+    代表: Neumann U87、AKG C414
+  
+  ECM (驻极体电容):
+    使用永久极化的驻极体材料 → 无需 48V
+    内置 JFET 阻抗变换器
+    供电: 2-10V (bias voltage)
+    缺点: 性能随温度/湿度衰退，一致性差
+    已被 MEMS 大量取代 (手机/车载领域)
+```
+
+#### MEMS 麦克风原理
+
+```
+原理: 微机电电容传感 + ASIC 信号调理
+  声波 → 声孔 → 微机械振膌 (硅基) → 电容变化
+  → ASIC 放大 + ADC → 数字 PDM/模拟输出
+
+  制造工艺:
+    振膌 + 背板: MEMS 微加工 (融刻/満刻)
+    ASIC: 标准 CMOS 工艺
+    封装: 振膌芯片 + ASIC 芯片 wire-bond 封装在金属罩内
+
+  输出类型:
+    模拟 (Analog): 电压输出，需外部 ADC
+    数字 PDM: 1-bit ∆Σ调制输出，直连 SoC PDM 接口
+    数字 I2S: 内置完整 ADC，稀少但有 (SPH0645LM4H)
+```
+
+#### 压电式 (Piezoelectric)
+
+```
+原理: 压电效应 (Piezoelectric Effect)
+  机械应力/变形 → 晶体产生电荷 → 输出电压
+  常用材料: PZT (锋钛锁铛陶瓷)、PVDF (聚偏氟乙烯 压电薄膜)
+
+  应用场景:
+    骨传导麦克风: 拾取颈部/颜骨振动，抗环境噪声
+    加速度计麦克风: 车载 ANC/RNC 参考信号
+    水下/防爆场景: 结构密封，无需声孔
+  
+  特点:
+    ✔ 耐用、防水、无需供电
+    ✘ 频响窄 (一般只覆盖 100Hz-4kHz)、音质一般
+```
+
+### 1.3 MEMS 麦克风芯片详解
 
 ```mermaid
 graph TD
@@ -54,7 +132,7 @@ graph TD
 | **Goertek** | S15OB381-049 | 国产，车规 |
 | **STMicroelectronics** | MP23ABS1 | 高 AOP |
 
-### 1.3 指向性 (Polar Patterns)
+### 1.4 指向性 (Polar Patterns)
 
 ```
               0° (正前方)
@@ -76,7 +154,7 @@ graph TD
   8字形: 前后拾音，抑制侧面 (用于中侧录音)
 ```
 
-### 1.4 麦克风阵列与波束成形
+### 1.5 麦克风阵列与波束成形
 
 ```
 波束成形原理 (Delay-and-Sum):
@@ -152,7 +230,63 @@ graph TD
 | **BL** | T·m | 力因子 | 0.3-0.8 |
 | **SPL** | dB | 灵敏度 (1W/1m) | 78-85 dB |
 
-### 2.3 微型扬声器 (Microspeaker)
+### 2.3 扬声器物理原理
+
+```
+电动式 (动圈式) 扬声器工作原理:
+
+  安培力 (Ampere Force): F = B × I × L
+  
+  1. 音频电流通过音圈 (Voice Coil)
+  2. 音圈在永久磁铁磁场中受安培力驱动
+  3. 音圈带动振膌 (Cone/Diaphragm) 前后运动
+  4. 振膌推动空气产生声波
+  5. 弹波 (Spider) + 折环 (Surround) 提供回复力
+
+  等效电路模型 (Lumped Parameter Model):
+    电域:  Re (DC电阻) + Le (电感) + Bl:转换 (Gyrator)
+    机械域: Mms (运动质量) + Cms (顺性) + Rms (阻尼)
+    声域:  Sd (有效辐射面积) + 空气负载
+    
+    关系: 电域 ↔ 机械域通过 Bl↔ (Force Factor) 耦合
+    Fs = 1 / (2π × √(Mms × Cms))  ← 共振频率
+```
+
+```
+其他扬声器类型:
+
+  压电式扬声器 (Piezoelectric Speaker):
+    原理: 压电材料加电变形 → 振动发声
+    应用: 骨传导耳机、超薄设备、声表面扬声器
+    供应商: 美律实 (Murata)、TDK
+    特点: 超薄 (<1mm)、低功耗、但低频差
+
+  平板式扬声器 (Planar Magnetic):
+    原理: 导电薄膜在平面磁场中运动
+    应用: 高端耳机 (Audeze LCD、HiFiMAN)
+    特点: 低失真、瓦态响应好、但功耗大
+
+  静电式扬声器 (Electrostatic):
+    原理: 带电薄膜在电场中运动 (F = qE)
+    应用: 发烧耳机 (STAX)、大型 HiFi
+    特点: 失真极低，但需要偏置电源 (~580V)
+```
+
+### 2.4 主流扬声器供应商与型号
+
+| 供应商 | 代表型号/产品线 | 类型 | 应用 |
+|:---|:---|:---|:---|
+| **AAC Technologies (瘴声声学)** | 15mm/17mm 微型 SPK | 动圈式微型 | 手机 (苹果/华为/小米 主力供应商) |
+| **Goertek (歌尔股份)** | SPK模组 + Receiver | 动圈式微型 | 手机/TWS 耳机/VR/AR |
+| **Knowles** | BA (Balanced Armature) 系列 | 动铁式微型 | 入耳式耳机、助听器 |
+| **Harman/JBL** | JBL 车载系列、Infinity | 动圈式全尺寸 | 车载 OEM (BMW/奇瑞) |
+| **Bose** | 车载定制单元 | 动圈式 | 车载 OEM (保时捷/凯迪拉克) |
+| **Dynaudio** | Esotar 系列 | 动圈式 | 车载 OEM (大众/沃尔沃) |
+| **Burmester** | 车载定制高音/中音 | 动圈式 | 车载 OEM (奔驰/保时捷) |
+| **Focal** | Utopia/Flax 系列 | 动圈式 | 车载 (标致、雪铁龙) |
+| **Murata (村田)** | 压电 SPK | 压电式 | 超薄设备、IoT |
+
+### 2.5 微型扬声器 (Microspeaker)
 
 手机扬声器的特殊挑战：
 
@@ -170,7 +304,7 @@ graph TD
     - 需要 SmartPA 保护 + 虚拟低音增强
 ```
 
-### 2.4 SmartPA 保护算法
+### 2.6 SmartPA 保护算法
 
 ```mermaid
 graph LR

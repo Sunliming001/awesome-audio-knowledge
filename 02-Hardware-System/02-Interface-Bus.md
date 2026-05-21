@@ -663,6 +663,100 @@ adb shell cat /sys/kernel/debug/soundwire/master-0/statistics
 
 ---
 
+# Part 5: I2C / SPI 控制接口
+
+音频数据通路使用 I2S/TDM/SoundWire 传输 PCM 数据，但芯片的**配置与控制**（寄存器读写、增益设置、路由切换）通常使用独立的低速控制总线。
+
+## 5.1 I2C (Inter-Integrated Circuit)
+
+```
+I2C 基本原理:
+  由 Philips (NXP) 于 1982 年提出的两线制同步串行总线
+
+  信号线:
+    SDA (Serial Data)  → 双向数据线 (开漏, 需要上拉电阻)
+    SCL (Serial Clock) → 时钟线 (Master 驱动)
+
+  特点:
+    ✔ 仅 2 根线，支持多设备挂载 (通过 7-bit 地址区分)
+    ✔ 速率: 100kHz (标准) / 400kHz (快速) / 1MHz (快速+) / 3.4MHz (高速)
+    ✔ 硬件简单，几乎所有 Codec/SmartPA 都支持
+    ✘ 半双工、速率有限、不适合传输音频数据
+
+  通信时序:
+    Master                    Slave (如 Codec 0x34)
+      |--- START ------------>|
+      |--- Slave Addr + W --->|
+      |<-- ACK ---------------|
+      |--- Register Addr ---->|
+      |<-- ACK ---------------|
+      |--- Data Byte -------->|
+      |<-- ACK ---------------|
+      |--- STOP ------------->|
+
+  典型音频应用:
+    SoC → I2C → Codec (WCD938x): 配置增益、路由、时钟
+    SoC → I2C → SmartPA (TFA9874): 配置保护参数、读取温度
+    SoC → I2C → A2B Master (AD2428W): 配置级联拓扑
+    Master → A2B → I2C → 远端 Slave 设备: 远程寄存器访问
+```
+
+```
+I2C 寄存器读写范例 (Linux regmap):
+
+  // 大多数音频芯片驱动使用 regmap 抽象层
+  // regmap 自动处理字节序、缓存、batch write
+
+  struct regmap_config codec_regmap = {
+      .reg_bits = 16,           // 寄存器地址宽度 (WCD 用 16-bit)
+      .val_bits = 8,            // 寄存器值宽度
+      .max_register = 0xFFFF,
+      .cache_type = REGCACHE_RBTREE,  // 寄存器缓存 (减少 I2C 读)
+  };
+
+  // 读写操作
+  regmap_write(regmap, 0x3024, 0x0A);    // 写寄存器
+  regmap_read(regmap, 0x3024, &val);     // 读寄存器
+  regmap_update_bits(regmap, 0x3024, 0xF0, 0x50); // 修改特定位
+```
+
+## 5.2 SPI (Serial Peripheral Interface)
+
+```
+SPI 基本原理:
+  由 Motorola 提出的四线制同步串行接口
+
+  信号线:
+    SCLK → 时钟 (Master 驱动)
+    MOSI → Master Out Slave In (主→从 数据)
+    MISO → Master In Slave Out (从→主 数据)
+    CS/SS → Chip Select (片选, 每个从设备一根)
+
+  特点:
+    ✔ 全双工、速率高 (可达 50MHz+)
+    ✔ 无寻址开销，通信效率高
+    ✘ 引脚多 (每增一个从设备多一根 CS)
+    ✘ 无标准应答机制
+
+  音频领域应用:
+    SoC → SPI → 外部 DSP (如 ADAU1452): 高速固件下载 + 参数更新
+    SoC → SPI → Codec (部分 Realtek/Cirrus): 高速寄存器批量配置
+    SoC → SPI → Flash: 加载 DSP 固件/校准数据
+```
+
+## 5.3 I2C vs SPI 选型
+
+| 维度 | I2C | SPI |
+|:---|:---|:---|
+| **信号线数** | 2 (SDA + SCL) | 4+ (SCLK + MOSI + MISO + CS) |
+| **最高速率** | 3.4MHz (High-Speed) | 50MHz+ |
+| **多设备** | 地址寻址 (最多 127 个) | 每设备独立 CS |
+| **双工** | 半双工 | 全双工 |
+| **音频用途** | Codec/SmartPA 寄存器控制 (主流) | DSP 固件下载、高速参数更新 |
+| **Linux 驱动** | `drivers/i2c/` + `regmap-i2c` | `drivers/spi/` + `regmap-spi` |
+
+---
+
 ## 关键参考 (References)
 
 1. *I2S Bus Specification* - Philips Semiconductors, 1986 (Rev 1996)

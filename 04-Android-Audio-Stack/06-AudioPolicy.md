@@ -937,6 +937,148 @@ AudioPolicyManager::getInputForAttr(attr, input, session, uid, ...)
     → 保持 BACK_MIC (摄像场景不用耳机 MIC)
 ```
 
+### 5.2.1 Source → 设备选择的底层决策逻辑
+
+上表只列出了"默认设备"，实际选择由 Engine 内部的 `getDeviceForInputSource()` 函数完成，**依据三层叠加规则**：
+
+```
+═══════════════════════════════════════════════════════════════════
+三层决策模型:
+═══════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 第一层: source 语义 → 决定"设备类别"                         │
+  │                                                              │
+  │  不同 source 在物理上需要不同的采集点:                        │
+  │                                                              │
+  │  SOURCE_MIC / VOICE_*      → 通话类 MIC (前置, 靠近嘴)     │
+  │  SOURCE_CAMCORDER          → 后置 MIC (靠近摄像头)          │
+  │  SOURCE_VOICE_CALL         → TELEPHONY_RX (Modem 侧信号)   │
+  │  SOURCE_ECHO_REFERENCE    → 回采通道 (DAC 输出端 loopback) │
+  │                                                              │
+  │  这一层是固定的语义映射, 不随设备连接状态变化                 │
+  ├─────────────────────────────────────────────────────────────┤
+  │ 第二层: ForceUse → 可覆盖默认选择                            │
+  │                                                              │
+  │  由 AudioService / TelecomService 在运行时设置:             │
+  │                                                              │
+  │  FORCE_BT_SCO  → 强制蓝牙 SCO MIC (通话切 BT 耳机时)       │
+  │  FORCE_SPEAKER → 免提模式, 但录音仍用 BUILTIN_MIC           │
+  │  FORCE_NONE    → 不强制, 走正常优先级                        │
+  │                                                              │
+  │  ForceUse 优先级最高, 一旦设置, 跳过第三层的优先级排序       │
+  ├─────────────────────────────────────────────────────────────┤
+  │ 第三层: availableDevices → 按固定优先级选第一个已连接的设备  │
+  │                                                              │
+  │  通用 MIC 类 source (MIC/VOICE_RECOGNITION/VOICE_COMM/      │
+  │  VOICE_PERFORMANCE/UNPROCESSED/HOTWORD) 共用的优先级:        │
+  │                                                              │
+  │    优先级 1: BT_SCO_HEADSET     (仅当 ForceUse=BT_SCO)      │
+  │    优先级 2: WIRED_HEADSET      (有线耳机自带 MIC)           │
+  │    优先级 3: USB_HEADSET        (USB 耳机)                   │
+  │    优先级 4: USB_DEVICE         (USB 外接 MIC)               │
+  │    优先级 5: BLUETOOTH_BLE      (BLE 音频输入, Android 13+)  │
+  │    优先级 6: BUILTIN_MIC        (内置 MIC, 默认兜底)         │
+  │                                                              │
+  │  核心思想: 外接设备 > 内置设备                                │
+  │  (外接 MIC 离嘴更近, 信噪比更高, 用户主动插入 = 主动选择)    │
+  └─────────────────────────────────────────────────────────────┘
+```
+
+**enginedefault 中的完整伪代码** (简化自 `enginedefault/src/Engine.cpp`)：
+
+```cpp
+// Engine::getDeviceForInputSource() 核心决策逻辑 (伪代码)
+
+audio_devices_t getDeviceForInputSource(audio_source_t source) {
+    
+    // ========== 特殊 source: 固定设备, 不走优先级 ==========
+    
+    switch (source) {
+    case AUDIO_SOURCE_VOICE_UPLINK:
+    case AUDIO_SOURCE_VOICE_DOWNLINK:
+    case AUDIO_SOURCE_VOICE_CALL:
+        return AUDIO_DEVICE_IN_TELEPHONY_RX;   // 直接返回, 不看连接状态
+    
+    case AUDIO_SOURCE_ECHO_REFERENCE:
+        return AUDIO_DEVICE_IN_ECHO_REFERENCE;  // 直接返回
+    
+    case AUDIO_SOURCE_FM_TUNER:
+        return AUDIO_DEVICE_IN_FM_TUNER;        // 直接返回
+    
+    case AUDIO_SOURCE_REMOTE_SUBMIX:
+        return AUDIO_DEVICE_IN_REMOTE_SUBMIX;   // 直接返回
+    
+    // ========== CAMCORDER: 特殊优先级 (后置 MIC 优先) ==========
+    
+    case AUDIO_SOURCE_CAMCORDER:
+        if (available(AUDIO_DEVICE_IN_BACK_MIC))
+            return AUDIO_DEVICE_IN_BACK_MIC;
+        return AUDIO_DEVICE_IN_BUILTIN_MIC;     // 无后置则用主 MIC
+    
+    // ========== 通用 MIC 类: 共用优先级逻辑 ==========
+    
+    case AUDIO_SOURCE_DEFAULT:
+    case AUDIO_SOURCE_MIC:
+    case AUDIO_SOURCE_VOICE_RECOGNITION:
+    case AUDIO_SOURCE_HOTWORD:
+    case AUDIO_SOURCE_UNPROCESSED:
+    case AUDIO_SOURCE_VOICE_PERFORMANCE:
+    case AUDIO_SOURCE_VOICE_COMMUNICATION:
+        
+        // --- ForceUse 检查 (第二层, 最高优先) ---
+        if (source == VOICE_COMMUNICATION) {
+            // 通信类用 FOR_COMMUNICATION 的 ForceUse
+            if (getForceUse(FOR_COMMUNICATION) == FORCE_BT_SCO
+                    && available(BT_SCO_HEADSET))
+                return BT_SCO_HEADSET;
+        } else {
+            // 非通信类用 FOR_RECORD 的 ForceUse
+            if (getForceUse(FOR_RECORD) == FORCE_BT_SCO
+                    && available(BT_SCO_HEADSET))
+                return BT_SCO_HEADSET;
+        }
+        
+        // --- availableDevices 优先级 (第三层) ---
+        if (available(WIRED_HEADSET))       return WIRED_HEADSET;
+        if (available(USB_HEADSET))         return USB_HEADSET;
+        if (available(USB_DEVICE))          return USB_DEVICE;
+        if (available(BLE_HEADSET))         return BLE_HEADSET;  // Android 13+
+        return BUILTIN_MIC;                 // 兜底
+    }
+}
+```
+
+**为什么这样设计？**
+
+```
+┌─────────────────────────────┬────────────────────────────────────────────┐
+│ 设计选择                     │ 原因                                      │
+├─────────────────────────────┼────────────────────────────────────────────┤
+│ CAMCORDER → BACK_MIC        │ 录视频需要靠近镜头的 MIC 收环境声,        │
+│                              │ 前置 MIC 会收到用户呼吸声/说话声          │
+├─────────────────────────────┼────────────────────────────────────────────┤
+│ 外接设备优先于内置           │ 用户插耳机/USB 麦 = 主动选择更好的采集设备 │
+│                              │ 外接 MIC 距嘴更近, 信噪比 (SNR) 更高      │
+├─────────────────────────────┼────────────────────────────────────────────┤
+│ ForceUse 可覆盖所有          │ 系统级强制切换 (如通话强制走 BT SCO),     │
+│                              │ 即使有线耳机也插着, 也要用蓝牙 MIC        │
+├─────────────────────────────┼────────────────────────────────────────────┤
+│ VOICE_PERFORMANCE 不加 AEC  │ K歌用户一定戴耳机, 无回声问题;            │
+│                              │ 加 AEC 反而损失人声质感和低频              │
+├─────────────────────────────┼────────────────────────────────────────────┤
+│ ECHO_REFERENCE → 专用设备    │ 回采信号来自 DAC 输出端的 loopback,       │
+│                              │ 物理上不是 MIC, 需要 ADSP 内部路由        │
+├─────────────────────────────┼────────────────────────────────────────────┤
+│ CAMCORDER 不跟随耳机切换     │ 即使插了耳机, 录视频仍用 BACK_MIC,       │
+│                              │ 因为耳机 MIC 收不到环境声 (被衣领遮挡)    │
+├─────────────────────────────┼────────────────────────────────────────────┤
+│ VOICE_COMM 用 FOR_COMM      │ 通信 source 受通话管理控制 (TelecomService)│
+│ 其他用 FOR_RECORD            │ 非通信 source 受录音策略控制 (AudioService)│
+│                              │ 两套 ForceUse 独立, 互不干扰              │
+└─────────────────────────────┴────────────────────────────────────────────┘
+```
+
 ### 5.3 并发录音冲突处理
 
 ```

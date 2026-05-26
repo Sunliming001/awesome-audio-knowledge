@@ -547,44 +547,325 @@ for (auto& output : mOutputs) {
 
 ---
 
-## 4. AudioPolicyEngine 可替换架构
+## 4. AudioPolicyEngine 深度解析
 
-路由决策的核心逻辑并非固化在 `AudioPolicyManager` 中，而是通过可插拔的 **Engine** 实现：
+路由决策的核心逻辑并非固化在 `AudioPolicyManager` 中，而是通过可插拔的 **Engine** 实现。
+
+### 4.1 Engine 在整体架构中的位置
 
 ```mermaid
 graph TD
-    subgraph APM ["AudioPolicyManager"]
-        CORE["核心逻辑<br/>(Output/Device 管理)"]
+    subgraph Service ["AudioPolicyService (Binder入口)"]
+        APS["AudioPolicyInterfaceImpl"]
     end
     
-    subgraph Engine ["可替换 Engine"]
-        DEFAULT["libaudiopolicyenginedefault.so<br/>(默认引擎: 基于硬编码优先级)"]
-        CONFIG["libaudiopolicyengineconfigurable.so<br/>(可配置引擎: 基于 PFW 规则)"]
+    subgraph Manager ["AudioPolicyManager (管理+执行)"]
+        APM_OUT["getOutputForAttr()<br/>播放路由"]
+        APM_IN["getInputForAttr()<br/>录音路由"]
+        APM_VOL["setVolumeIndex()<br/>音量管理"]
+        APM_DEV["setDeviceConnectionState()<br/>设备管理"]
     end
     
-    APM --> |"IEngine 接口"| DEFAULT
-    APM --> |"IEngine 接口"| CONFIG
+    subgraph Engine ["Engine (决策引擎, 可替换)"]
+        ENG_IF["EngineInterface<br/>(IEngine 接口)"]
+        ENG_BASE["EngineBase<br/>(公共基类)"]
+        ENG_DEFAULT["EngineDefault<br/>(硬编码优先级)"]
+        ENG_CONFIG["EngineConfigurable<br/>(PFW 规则)"]
+    end
+    
+    APS --> APM_OUT
+    APS --> APM_IN
+    APM_OUT --> |"查询策略+设备"| ENG_IF
+    APM_IN --> |"查询录音设备"| ENG_IF
+    APM_VOL --> |"查询 VolumeGroup"| ENG_IF
+    ENG_IF --> ENG_BASE
+    ENG_BASE --> ENG_DEFAULT
+    ENG_BASE --> ENG_CONFIG
 ```
 
-### 4.1 Default Engine
+**核心设计思想**：
+- `AudioPolicyManager` 负责**管理**（维护 Output/Input 列表、设备列表、Patch）和**执行**（调用 AudioFlinger 开关设备）
+- `Engine` 只负责**决策**（告诉 Manager 应该选什么设备）
+- 两者通过 `EngineInterface` 解耦，厂商可替换 Engine 而不改 Manager
 
-*   优先级规则硬编码在 C++ 中
-*   逻辑简单直接，适合手机场景
-*   修改需重新编译
-
-### 4.2 Configurable Engine (PFW)
-
-基于 Intel’s **Parameter Framework (PFW)** 的规则引擎：
+### 4.2 Engine 类继承与调用关系
 
 ```
-audio_policy_engine_configuration.xml
-├── ProductStrategies     // 定义策略与 Attributes 的映射
-├── Criteria             // 定义决策条件 (设备连接状态, 通话状态...)
-├── CriterionTypes       // 条件的取值类型
-└── Domains/Rules        // 决策规则 (if-then 条件)
+源码路径与编译产物:
+
+  engine/interface/EngineInterface.h     ← 纯虚接口
+  engine/common/src/EngineBase.cpp       ← 公共基类 (策略映射/音量组/ForceUse 存储)
+  enginedefault/src/Engine.cpp           ← libaudiopolicyenginedefault.so
+  engineconfigurable/src/Engine.cpp      ← libaudiopolicyengineconfigurable.so
+
+类继承:
+  EngineInterface (纯虚接口)
+    └── EngineBase (实现通用逻辑)
+          ├── enginedefault::Engine   ← 手机默认
+          └── engineconfigurable::Engine  ← 车载/定制
+
+EngineBase 通用逻辑 (两个引擎共享):
+  - loadAudioPolicyEngineConfig(): 解析 audio_policy_engine_configuration.xml
+  - ProductStrategy 管理: AudioAttributes ↔ Strategy 映射表
+  - VolumeGroup 管理: Strategy ↔ Stream ↔ VolumeGroup 映射
+  - ForceUse 存储: mForceUse[] 数组 (设置/查询强制路由)
+  - 音量曲线: loadVolumeCurves() → 各 VolumeGroup 的 dB 映射表
+
+Engine-specific 逻辑 (各自实现):
+  - getDevicesForProductStrategy()  ← 播放设备选择 (核心差异点!)
+  - getDeviceForInputSource()       ← 录音设备选择
 ```
 
-**优势**：可在不重新编译的情况下，通过修改 XML 调整路由规则。车载 (AAOS) 场景常用。
+### 4.3 APM ↔ Engine 完整调用序列
+
+```
+═══════════════════════════════════════════════════════════════
+场景: App 请求播放音乐 (usage=MEDIA)
+═══════════════════════════════════════════════════════════════
+
+AudioPolicyManager::getOutputForAttr(attr, ...)
+  │
+  │  ① 获取 ProductStrategy
+  ├──→ mEngine->getProductStrategyForAttributes(attr)
+  │      EngineBase 实现:
+  │        遍历 mProductStrategies (从 XML 加载的映射表)
+  │        匹配 attr.usage == USAGE_MEDIA
+  │        → 返回 PRODUCT_STRATEGY_MEDIA
+  │
+  │  ② 获取应选输出设备
+  ├──→ mEngine->getOutputDevicesForAttributes(attr, availableDevices, outputs)
+  │      EngineDefault 实现:
+  │        → getDevicesForProductStrategy(PRODUCT_STRATEGY_MEDIA)
+  │           switch(strategy) { case MEDIA: ... } (见 section 2.4)
+  │        → 返回 DeviceVector {BT_A2DP} 或 {SPEAKER}
+  │
+  │      EngineConfigurable 实现:
+  │        → ParameterManagerWrapper::getDeviceForStrategy(MEDIA)
+  │           PFW 查询: applyConfiguration() → 匹配规则 → 返回设备
+  │        → 返回 DeviceVector {BT_A2DP} 或 {SPEAKER}
+  │
+  │  ③ APM 自己完成: 根据设备找到最佳 Output
+  ├──→ getOutputForDevices(devices, session, flags)
+  │      遍历 mOutputs:
+  │        - output 必须支持目标 device
+  │        - output flags 与请求 flags 匹配度最高
+  │      → 返回 output handle (e.g. deep_buffer thread)
+  │
+  └──→ 返回给调用者: (output, selectedDevice, strategy)
+
+═══════════════════════════════════════════════════════════════
+场景: App 请求录音 (source=VOICE_COMMUNICATION)
+═══════════════════════════════════════════════════════════════
+
+AudioPolicyManager::getInputForAttr(attr, ...)
+  │
+  │  ① 获取录音设备
+  ├──→ mEngine->getInputDeviceForAttributes(attr)
+  │      EngineDefault 实现:
+  │        → getDeviceForInputSource(VOICE_COMMUNICATION)
+  │           if (ForceUse(FOR_COMMUNICATION) == FORCE_BT_SCO
+  │               && isConnected(BT_SCO_HEADSET))
+  │             → BT_SCO_HEADSET
+  │           if (isConnected(WIRED_HEADSET))
+  │             → WIRED_HEADSET
+  │           → BUILTIN_MIC
+  │
+  │  ② APM 自己完成: 查找 InputProfile + 打开 Input
+  └──→ (后续见 section 5.1)
+
+═══════════════════════════════════════════════════════════════
+场景: 设备连接状态变化 (耳机插入)
+═══════════════════════════════════════════════════════════════
+
+AudioPolicyManager::setDeviceConnectionState(HEADSET, CONNECTED)
+  │
+  ├── 更新 mAvailableOutputDevices / mAvailableInputDevices
+  │
+  ├── checkForDeviceAndOutputChanges()
+  │     对每个活跃的 output/strategy:
+  │       ① 重新查询 Engine:
+  │          mEngine->getOutputDevicesForAttributes(...)
+  │            → 由于 HEADSET 已连接, MEDIA 策略现在返回 HEADSET
+  │       ② 如果设备变了 → setOutputDevices(output, newDevices)
+  │            → createAudioPatch() 或 setParameters("routing=...")
+  │
+  └── 对 EngineConfigurable:
+        wrapper->setCriterionValue("AvailableOutputDevices",
+                                    SPEAKER|HEADSET|BT_A2DP)
+        → PFW 自动 re-evaluate 所有 Domain → 可能改变多个 Strategy 的设备
+```
+
+### 4.4 Default Engine 详解
+
+```
+文件: frameworks/av/services/audiopolicy/enginedefault/src/Engine.cpp
+编译产物: libaudiopolicyenginedefault.so
+
+核心函数签名:
+  DeviceVector Engine::getOutputDevicesForAttributes(
+      const audio_attributes_t &attr,
+      const DeviceVector &availableOutputDevices,
+      const SwAudioOutputCollection &outputs) const
+
+内部实现:
+  1. getProductStrategyForAttributes(attr) → strategy
+  2. getDevicesForProductStrategy(strategy):
+       → 大 switch-case, 检查 ForceUse + 已连接设备
+       → 返回 DeviceVector
+
+完整优先级 (STRATEGY_MEDIA):
+  ┌────┬──────────────────────────────────┬────────────────────────┐
+  │ 序 │ 条件                              │ 选择的设备              │
+  ├────┼──────────────────────────────────┼────────────────────────┤
+  │ 1  │ Hearing Aid 已连接                │ HEARING_AID            │
+  │ 2  │ BT A2DP 已连接                   │ BT_A2DP                │
+  │    │ 且 ForceUse != FORCE_NO_BT_A2DP  │                        │
+  │ 3  │ BT LE Audio 已连接               │ BLE_HEADSET            │
+  │ 4  │ 有线耳机已连接                    │ WIRED_HEADSET          │
+  │ 5  │ USB 设备已连接                    │ USB_DEVICE/USB_HEADSET │
+  │ 6  │ HDMI 已连接                      │ AUX_DIGITAL            │
+  │ 7  │ Dock 已连接且 ForceUse=DOCK      │ ANLG_DOCK/DGTL_DOCK    │
+  │ 8  │ 以上都不满足                      │ SPEAKER (默认)         │
+  └────┴──────────────────────────────────┴────────────────────────┘
+
+ForceUse 触发场景:
+  用户按 "免提" → AudioService.setForceUse(FOR_COMMUNICATION, FORCE_SPEAKER)
+    → APM 转发给 Engine: mEngine->setForceUse(FOR_COMMUNICATION, FORCE_SPEAKER)
+    → Engine 存储到 mForceUse[FOR_COMMUNICATION] = FORCE_SPEAKER
+    → APM 调用 checkForDeviceAndOutputChanges() 重新路由
+    → STRATEGY_PHONE: EARPIECE → SPEAKER
+
+优缺点:
+  ✅ 代码直观, 容易用 logcat 跟踪决策过程
+  ✅ 执行效率高 (纯 C++ 条件判断)
+  ❌ OEM 修改需改源码重编译 → 不利于产品线差异化
+  ❌ 无法动态调整优先级 (如: 某款车需要 USB 优先于 BT)
+```
+
+### 4.5 Configurable Engine (PFW) 详解
+
+```
+文件: frameworks/av/services/audiopolicy/engineconfigurable/
+编译产物: libaudiopolicyengineconfigurable.so
+
+PFW 三大核心概念:
+
+  1. Criteria (决策条件):
+     定义系统当前状态变量, Engine 负责实时更新:
+     ┌──────────────────────────────┬─────────────────────────────────┐
+     │ Criterion 名称                │ 值的含义                         │
+     ├──────────────────────────────┼─────────────────────────────────┤
+     │ AvailableOutputDevices       │ 位掩码: 当前已连接的输出设备      │
+     │ AvailableInputDevices        │ 位掩码: 当前已连接的输入设备      │
+     │ TelephonyMode                │ 枚举: Normal/Ringtone/InCall/... │
+     │ ForceUseForCommunication     │ 枚举: None/Speaker/BtSco        │
+     │ ForceUseForMedia             │ 枚举: None/NoBtA2dp/Speaker     │
+     │ ForceUseForRecord            │ 枚举: None/BtSco                │
+     └──────────────────────────────┴─────────────────────────────────┘
+  
+  2. Domains (决策域):
+     每个 Domain 对应一个要决定的参数 (如: MEDIA 策略的输出设备)
+     Domain 内部有多个 Configuration (配置项), 按优先级排列
+  
+  3. Rules (规则):
+     每个 Configuration 有一条规则, 描述 "在什么条件下选择此配置"
+
+完整配置文件关系:
+
+  audio_policy_engine_configuration.xml (入口)
+    ├── <productStrategies>
+    │     <ProductStrategy name="STRATEGY_MEDIA">
+    │       <AttributesGroup usage="USAGE_MEDIA" content_type="CONTENT_TYPE_MUSIC"/>
+    │       <AttributesGroup usage="USAGE_GAME"/>
+    │     </ProductStrategy>
+    │
+    ├── <criterionTypes>
+    │     <criterion_type name="OutputDevicesMaskType" type="inclusive">
+    │       <values>
+    │         <value literal="Speaker" numerical="0x2"/>
+    │         <value literal="WiredHeadset" numerical="0x4"/>
+    │         <value literal="BtA2dp" numerical="0x80"/>
+    │       </values>
+    │     </criterion_type>
+    │
+    ├── <criteria>
+    │     <criterion name="AvailableOutputDevices"
+    │                type="OutputDevicesMaskType" default="Speaker"/>
+    │
+    └── 引用 PFW Settings 文件:
+          <Settings> → 外部 XML 文件定义 Domain/Rule
+
+PFW Settings 文件示例 (决策规则):
+
+  <Domain name="DeviceForStrategy.Media">
+    <Configuration name="BtA2dp" priority="0">  ← 最高优先级
+      <CompoundRule Type="All">
+        <SelectionCriterionRule SelectionCriterion="AvailableOutputDevices"
+                                MatchesWhen="Includes" Value="BtA2dp"/>
+        <SelectionCriterionRule SelectionCriterion="ForceUseForMedia"
+                                MatchesWhen="IsNot" Value="ForceNoBtA2dp"/>
+      </CompoundRule>
+      <Parameter name="device">BtA2dp</Parameter>
+    </Configuration>
+    
+    <Configuration name="WiredHeadset" priority="1">
+      <CompoundRule Type="All">
+        <SelectionCriterionRule SelectionCriterion="AvailableOutputDevices"
+                                MatchesWhen="Includes" Value="WiredHeadset"/>
+      </CompoundRule>
+      <Parameter name="device">WiredHeadset</Parameter>
+    </Configuration>
+    
+    <Configuration name="Speaker" priority="2">  ← 默认 (最低优先级)
+      <CompoundRule Type="All"/>  ← 无条件, 永真
+      <Parameter name="device">Speaker</Parameter>
+    </Configuration>
+  </Domain>
+
+运行时调用流程:
+  1. 设备变化 → APM 调用 Engine::setDeviceConnectionState()
+  2. Engine → ParameterManagerWrapper::setCriterionValue(
+       "AvailableOutputDevices", SPEAKER|BT_A2DP)
+  3. PFW::applyConfiguration() → 遍历所有 Domain
+  4. 每个 Domain 按 priority 顺序检查 Configuration 的 Rule
+  5. 第一个 Rule 匹配成功 → 该 Configuration 的 Parameter 生效
+  6. APM 读取结果: wrapper->getDeviceForStrategy("MEDIA") → BT_A2DP
+
+调试 PFW:
+  # 查看当前所有 Criteria 值
+  adb shell parameter-connector getParameter /Audio/...
+  
+  # 查看某个 Domain 当前选中的 Configuration
+  adb shell dumpsys media.audio_policy | grep -A 5 "PFW"
+
+优缺点:
+  ✅ 路由规则完全可配置, OEM 无需改 C++ 代码
+  ✅ 适合车载多音区 / 多 Bus 等复杂场景
+  ✅ 同一二进制支持不同产品线 (换 XML 即可)
+  ❌ 学习成本高, PFW 文档稀少
+  ❌ 运行时 Rule 匹配有额外开销
+  ❌ 调试困难 (不如 C++ 直接打断点)
+```
+
+### 4.6 如何选择 Engine
+
+| 场景 | 推荐引擎 | 理由 |
+|:---|:---|:---|
+| 标准手机 | `enginedefault` | 逻辑简单、性能好、AOSP 默认 |
+| AAOS 车载 | `engineconfigurable` | 多音区多 Bus、OEM 需灵活定制路由 |
+| IoT/穿戴 | `enginedefault` | 设备少、路由简单 |
+| 需要动态切换策略 | `engineconfigurable` | 可热更新 XML 不重编译 |
+
+**编译选择方式**（`device.mk`）：
+```makefile
+# 手机 (默认)
+PRODUCT_PACKAGES += libaudiopolicyenginedefault
+
+# 车载
+PRODUCT_PACKAGES += libaudiopolicyengineconfigurable
+```
+
+**运行时加载**：`AudioPolicyManager` 构造函数中通过 `dlopen` 加载对应 `.so`，系统只会存在一个 Engine 实例。
 
 ---
 
@@ -736,6 +1017,98 @@ Android 10+ 允许多个 App 同时录音, 但有优先级规则:
   
   如果是 SOURCE_MIC (普通录音):
     → 切换到 WIRED_HEADSET MIC
+
+场景 4: K歌 App 多路录音与混音 (Karaoke)
+
+  K歌核心需求:
+    - 录制人声 (MIC)
+    - 同时播放伴奏 (MEDIA output)
+    - 实时耳返 (低延迟监听自己的声音)
+    - 混音后输出 (人声 + 伴奏 → 录制/推流)
+
+  典型实现方案:
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 方案 A: 标准 Android API (大多数 K歌 App)                     │
+  ├─────────────────────────────────────────────────────────────┤
+  │                                                             │
+  │  AudioRecord (source=MIC/VOICE_PERFORMANCE)                 │
+  │    → BUILTIN_MIC / WIRED_HEADSET MIC                       │
+  │    → 采集人声 PCM                                           │
+  │                                                             │
+  │  AudioTrack (usage=MEDIA)                                   │
+  │    → 播放伴奏 → WIRED_HEADSET (或 Speaker)                  │
+  │                                                             │
+  │  App 层混音:                                                 │
+  │    人声 PCM + 伴奏 PCM → 软件混音 → 输出/录制/推流           │
+  │                                                             │
+  │  耳返实现:                                                   │
+  │    方式1: AudioTrack(flags=FAST) 回放 MIC 数据 (延迟~20ms)   │
+  │    方式2: 厂商 HAL 直通 (MIC→耳机, 延迟<5ms)                │
+  │    方式3: OpenSL ES / AAudio MMAP 模式 (延迟~10ms)          │
+  │                                                             │
+  │  Source 选择:                                                │
+  │    VOICE_PERFORMANCE: 专为 K歌 设计                          │
+  │      - 低延迟采集                                            │
+  │      - 不自动应用 AEC (因为不需要消除伴奏回声, 用户戴耳机)    │
+  │      - 不自动应用 NS (保留人声原始质感)                       │
+  │    MIC + UNPROCESSED: 备选, 完全不处理                       │
+  │                                                             │
+  └─────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 方案 B: ECHO_REFERENCE 回采 (专业 K歌 方案)                  │
+  ├─────────────────────────────────────────────────────────────┤
+  │                                                             │
+  │  AudioRecord 1: source=MIC → 人声采集                       │
+  │  AudioRecord 2: source=ECHO_REFERENCE → 回采播放端信号       │
+  │    → 获取 Speaker/耳机正在播放的伴奏信号                     │
+  │    → 用于精确对齐人声与伴奏的时间戳                          │
+  │                                                             │
+  │  优势: 可以实现精准的人声-伴奏同步, 即使不戴耳机             │
+  │  要求: Android 10+, 需要 MODIFY_AUDIO_ROUTING 权限           │
+  │                                                             │
+  └─────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 方案 C: 高通平台 K歌 方案 (ADSP 内处理)                      │
+  ├─────────────────────────────────────────────────────────────┤
+  │                                                             │
+  │  利用高通 AudioReach/CAPI 在 ADSP 内完成:                    │
+  │                                                             │
+  │  ADSP Topology:                                             │
+  │    MIC In → [CAPI: NS] → [CAPI: 变声/混响]                  │
+  │                                   ↓                         │
+  │    Music In → [CAPI: Mixer] ← 人声处理后                    │
+  │                    ↓                                        │
+  │               [CAPI: Limiter] → SPK/耳机 Out                │
+  │                    ↓                                        │
+  │               [Loopback] → App (录制/推流)                   │
+  │                                                             │
+  │  优势:                                                       │
+  │    - 超低延迟 (全在 ADSP, 不经过 AP 侧)                     │
+  │    - CPU 零负载 (App 不参与实时混音)                          │
+  │    - 可加硬件变声/混响效果                                   │
+  │  劣势:                                                       │
+  │    - 需要定制 HAL + ADSP topology                            │
+  │    - 平台强绑定                                             │
+  │                                                             │
+  └─────────────────────────────────────────────────────────────┘
+
+  AudioPolicy 层面的 K歌 配置要点:
+    1. audio_policy_configuration.xml 中需要 low_latency input:
+       <mixPort name="fast_input" role="sink"
+                flags="AUDIO_INPUT_FLAG_FAST">
+         <profile format="AUDIO_FORMAT_PCM_16_BIT"
+                  samplingRates="48000"
+                  channelMasks="AUDIO_CHANNEL_IN_MONO"/>
+       </mixPort>
+    
+    2. 确保 MIC 路由到 fast_input 而非普通 primary input
+    3. 耳返: 如果 HAL 支持内部 loopback, 通过 createAudioPatch:
+       patch: BUILTIN_MIC → WIRED_HEADSET (硬件直通, 无 AP 延迟)
+    4. 如果不支持硬件耳返:
+       App 用 AAudio (MMAP) 读 MIC + 写耳机, 延迟可控制在 ~10ms
 ```
 
 ---

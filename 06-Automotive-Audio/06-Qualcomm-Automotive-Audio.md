@@ -2,6 +2,16 @@
 
 高通 SA8295P (Snapdragon 8295) 是目前高端智能座舱的主流芯片平台，其音频子系统基于 AudioReach 架构，支持多域 (Multi-Domain) 音频处理、QNX Hypervisor 隔离和复杂的多通道 TDM 路由。本章聚焦 SA8295 车载音频的平台架构、Bringup 流程和典型场景配置。
 
+> **本章与 [07-Qualcomm-Platform](../07-Qualcomm-Platform/) 的定位区分：**
+>
+> | | 本章 (06/06) | 07-Qualcomm-Platform |
+> |:---|:---|:---|
+> | **视角** | **车载集成实战** — 以 SA8295 整车落地为主线 | **通用架构原理** — 适用于手机/IoT/车载全平台 |
+> | **重点** | Hypervisor 多域隔离、TDM 多通道配置、车载 Bringup Checklist、HFP 通话、Bus 路由 | AudioReach 框架设计、ADSP 拓扑、CAPI 模块开发、GEF 音效、LPI 唤醒、QACT 调试 |
+> | **读者** | 车载音频系统工程师、BSP 工程师 | 高通全平台音频开发者 |
+>
+> 两者互为补充：本章侧重"怎么在车上跑起来"，07 章侧重"底层架构怎么设计的"。
+
 ---
 
 ## 1. SA8295 音频硬件架构

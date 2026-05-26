@@ -24,5 +24,14 @@
     *   Android LE Audio 实现与调试命令。
     *   TWS 真无线与 CSIP 协调集。
 
+4.  **[蓝牙音频调试实战 (BT Audio Debug)](./04-BT-Audio-Debug.md)**
+    *   蓝牙音频问题分层模型（RF → HCI → Stack → Framework → App）。
+    *   btsnoop HCI Log 抓取与 Wireshark 分析（Codec 协商、ACL 丢包）。
+    *   A2DP 无声/卡顿/Codec 降级诊断流程图。
+    *   HFP 通话音质问题排查（单通、回声、WBS/NBS 确认）。
+    *   LE Audio 常见问题（CIS 建立失败、左右耳不同步）。
+    *   Codec Offload vs Software Encoding 确认与切换。
+    *   实战案例：LDAC 降级、HFP 切换无声、TWS 音量不一致。
+
 ---
 [返回主目录](../README.md)

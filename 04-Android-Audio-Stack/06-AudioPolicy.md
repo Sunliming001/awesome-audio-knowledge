@@ -985,69 +985,279 @@ AudioPolicyManager::getInputForAttr(attr, input, session, uid, ...)
   └─────────────────────────────────────────────────────────────┘
 ```
 
-**enginedefault 中的完整伪代码** (简化自 `enginedefault/src/Engine.cpp`)：
+**AOSP 源码分析** — 来自 `frameworks/av/services/audiopolicy/enginedefault/src/Engine.cpp`（AOSP main 分支）
+
+> 源码链接: https://cs.android.com/android/platform/superproject/main/+/main:frameworks/av/services/audiopolicy/enginedefault/src/Engine.cpp
+
+---
+
+#### Part 1: 函数入口 — 获取上下文 & 通话中强制覆盖
 
 ```cpp
-// Engine::getDeviceForInputSource() 核心决策逻辑 (伪代码)
+sp<DeviceDescriptor> Engine::getDeviceForInputSource(audio_source_t inputSource) const
+{
+    const DeviceVector availableOutputDevices = getApmObserver()->getAvailableOutputDevices();
+    const DeviceVector availableInputDevices = getApmObserver()->getAvailableInputDevices();
+    const SwAudioOutputCollection &outputs = getApmObserver()->getOutputs();
+    DeviceVector availableDevices = availableInputDevices;
+    sp<AudioOutputDescriptor> primaryOutput = outputs.getPrimaryOutput();
+    DeviceVector availablePrimaryDevices = primaryOutput == nullptr ? DeviceVector()
+            : availableInputDevices.getDevicesFromHwModule(primaryOutput->getModuleHandle());
+    sp<DeviceDescriptor> device;
 
-audio_devices_t getDeviceForInputSource(audio_source_t source) {
-    
-    // ========== 特殊 source: 固定设备, 不走优先级 ==========
-    
-    switch (source) {
-    case AUDIO_SOURCE_VOICE_UPLINK:
-    case AUDIO_SOURCE_VOICE_DOWNLINK:
-    case AUDIO_SOURCE_VOICE_CALL:
-        return AUDIO_DEVICE_IN_TELEPHONY_RX;   // 直接返回, 不看连接状态
-    
-    case AUDIO_SOURCE_ECHO_REFERENCE:
-        return AUDIO_DEVICE_IN_ECHO_REFERENCE;  // 直接返回
-    
-    case AUDIO_SOURCE_FM_TUNER:
-        return AUDIO_DEVICE_IN_FM_TUNER;        // 直接返回
-    
-    case AUDIO_SOURCE_REMOTE_SUBMIX:
-        return AUDIO_DEVICE_IN_REMOTE_SUBMIX;   // 直接返回
-    
-    // ========== CAMCORDER: 特殊优先级 (后置 MIC 优先) ==========
-    
-    case AUDIO_SOURCE_CAMCORDER:
-        if (available(AUDIO_DEVICE_IN_BACK_MIC))
-            return AUDIO_DEVICE_IN_BACK_MIC;
-        return AUDIO_DEVICE_IN_BUILTIN_MIC;     // 无后置则用主 MIC
-    
-    // ========== 通用 MIC 类: 共用优先级逻辑 ==========
-    
+    // when a call is active, force device selection to match source VOICE_COMMUNICATION
+    // for most other input sources to avoid rerouting call TX audio
+    if (isInCall()) {
+        switch (inputSource) {
+        case AUDIO_SOURCE_DEFAULT:
+        case AUDIO_SOURCE_MIC:
+        case AUDIO_SOURCE_VOICE_RECOGNITION:
+        case AUDIO_SOURCE_UNPROCESSED:
+        case AUDIO_SOURCE_HOTWORD:
+        case AUDIO_SOURCE_CAMCORDER:
+        case AUDIO_SOURCE_VOICE_PERFORMANCE:
+        case AUDIO_SOURCE_ULTRASOUND:
+            inputSource = AUDIO_SOURCE_VOICE_COMMUNICATION;
+            break;
+        default:
+            break;
+        }
+    }
+```
+
+**分析：**
+- `availableDevices` 就是当前已连接的所有输入设备集合（动态变化）
+- `availablePrimaryDevices` 是与 primary output 同一 HW module 的输入设备子集 — 用于限制通话时只能用 primary HAL 上的 MIC
+- **关键设计**：`isInCall()` 时几乎所有普通 source 都被**强制重写为 `VOICE_COMMUNICATION`**，避免第三方 App 录音时干扰通话 TX 路由。只有 `VOICE_CALL`、`ECHO_REFERENCE`、`FM_TUNER`、`REMOTE_SUBMIX` 等特殊 source 不受影响
+
+---
+
+#### Part 2: 优先设备 & 禁用设备 过滤
+
+```cpp
+    // Use the preferred device for the input source if it is available.
+    DeviceVector preferredInputDevices = getPreferredAvailableDevicesForInputSource(
+            availableDevices, inputSource);
+    if (!preferredInputDevices.isEmpty()) {
+        return preferredInputDevices[0];
+    }
+    // Remove the disabled device for the input source from the available input device list.
+    DeviceVector disabledInputDevices = getDisabledDevicesForInputSource(
+            availableDevices, inputSource);
+    availableDevices.remove(disabledInputDevices);
+
+    audio_devices_t commDeviceType =
+        getPreferredDeviceTypeForLegacyStrategy(availableOutputDevices, STRATEGY_PHONE);
+```
+
+**分析：**
+- `getPreferredAvailableDevicesForInputSource()`：查询 `setCommunicationDevice()` / `setPreferredDeviceForCapturePreset()` 设置的用户偏好设备，**优先级最高，直接返回**
+- `getDisabledDevicesForInputSource()`：从可用列表中移除被 API 标记为 disabled 的设备
+- `commDeviceType`：获取当前 **STRATEGY_PHONE 策略首选的输出设备类型**（如 BT_SCO_HEADSET、SPEAKER、BLE_HEADSET），后续用它决定录音端是否跟随蓝牙
+
+---
+
+#### Part 3: `DEFAULT` / `MIC` — 通用录音
+
+```cpp
+    switch (inputSource) {
     case AUDIO_SOURCE_DEFAULT:
     case AUDIO_SOURCE_MIC:
-    case AUDIO_SOURCE_VOICE_RECOGNITION:
-    case AUDIO_SOURCE_HOTWORD:
-    case AUDIO_SOURCE_UNPROCESSED:
-    case AUDIO_SOURCE_VOICE_PERFORMANCE:
-    case AUDIO_SOURCE_VOICE_COMMUNICATION:
-        
-        // --- ForceUse 检查 (第二层, 最高优先) ---
-        if (source == VOICE_COMMUNICATION) {
-            // 通信类用 FOR_COMMUNICATION 的 ForceUse
-            if (getForceUse(FOR_COMMUNICATION) == FORCE_BT_SCO
-                    && available(BT_SCO_HEADSET))
-                return BT_SCO_HEADSET;
-        } else {
-            // 非通信类用 FOR_RECORD 的 ForceUse
-            if (getForceUse(FOR_RECORD) == FORCE_BT_SCO
-                    && available(BT_SCO_HEADSET))
-                return BT_SCO_HEADSET;
+        device = availableDevices.getDevice(
+                AUDIO_DEVICE_IN_BLUETOOTH_A2DP, String8(""), AUDIO_FORMAT_DEFAULT);
+        if (device != nullptr) break;
+        if (audio_is_bluetooth_out_sco_device(commDeviceType)) {
+            device = availableDevices.getDevice(
+                    AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET, String8(""), AUDIO_FORMAT_DEFAULT);
+            if (device != nullptr) break;
         }
-        
-        // --- availableDevices 优先级 (第三层) ---
-        if (available(WIRED_HEADSET))       return WIRED_HEADSET;
-        if (available(USB_HEADSET))         return USB_HEADSET;
-        if (available(USB_DEVICE))          return USB_DEVICE;
-        if (available(BLE_HEADSET))         return BLE_HEADSET;  // Android 13+
-        return BUILTIN_MIC;                 // 兜底
+        device = availableDevices.getFirstExistingDevice({
+                AUDIO_DEVICE_IN_WIRED_HEADSET,
+                AUDIO_DEVICE_IN_USB_HEADSET, AUDIO_DEVICE_IN_USB_DEVICE,
+                AUDIO_DEVICE_IN_BLUETOOTH_BLE, AUDIO_DEVICE_IN_BUILTIN_MIC});
+        break;
+```
+
+**分析：**
+- **最高优先**：`BLUETOOTH_A2DP` 输入（A2DP source，如车载 BT 音乐回传，较罕见）
+- **BT SCO 条件进入**：仅当当前通话策略的输出设备是 SCO 类时，才尝试 SCO MIC —— 这就是"ForceUse"间接生效的方式（`commDeviceType` 由 `setForceUse(FOR_COMMUNICATION, FORCE_BT_SCO)` 间接影响）
+- **固定优先级链**：`WIRED_HEADSET > USB_HEADSET > USB_DEVICE > BLE > BUILTIN_MIC`
+- 核心原则：**外接 > 内置**（外接离嘴更近，信噪比更高）
+
+---
+
+#### Part 4: `VOICE_COMMUNICATION` — 通话/VoIP 录音
+
+```cpp
+    case AUDIO_SOURCE_VOICE_COMMUNICATION:
+        // Allow only use of devices on primary input if in call and HAL does not support routing
+        // to voice call path.
+        if ((getPhoneState() == AUDIO_MODE_IN_CALL) &&
+                (availableOutputDevices.getDevice(AUDIO_DEVICE_OUT_TELEPHONY_TX,
+                        String8(""), AUDIO_FORMAT_DEFAULT)) == nullptr) {
+            if (!availablePrimaryDevices.isEmpty()) {
+                availableDevices = availablePrimaryDevices;
+            }
+        }
+
+        if (audio_is_bluetooth_out_sco_device(commDeviceType)) {
+            device = availableDevices.getDevice(
+                    AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET, String8(""), AUDIO_FORMAT_DEFAULT);
+            if (device != nullptr) {
+                break;
+            }
+        }
+        switch (commDeviceType) {
+        case AUDIO_DEVICE_OUT_SPEAKER:
+            device = availableDevices.getFirstExistingDevice({
+                    AUDIO_DEVICE_IN_BACK_MIC, AUDIO_DEVICE_IN_BUILTIN_MIC,
+                    AUDIO_DEVICE_IN_USB_DEVICE, AUDIO_DEVICE_IN_USB_HEADSET});
+            break;
+        case AUDIO_DEVICE_OUT_BLE_HEADSET:
+            device = availableDevices.getDevice(
+                    AUDIO_DEVICE_IN_BLE_HEADSET, String8(""), AUDIO_FORMAT_DEFAULT);
+            if (device != nullptr) {
+                break;
+            }
+            ALOG("LE Audio selected for communication but input device not available");
+            FALLTHROUGH_INTENDED;
+        default:    // FORCE_NONE
+            device = availableDevices.getFirstExistingDevice({
+                    AUDIO_DEVICE_IN_WIRED_HEADSET, AUDIO_DEVICE_IN_USB_HEADSET,
+                    AUDIO_DEVICE_IN_USB_DEVICE, AUDIO_DEVICE_IN_BLUETOOTH_BLE,
+                    AUDIO_DEVICE_IN_BUILTIN_MIC});
+            break;
+        }
+        break;
+```
+
+**分析：**
+- **通话模式下 primary HAL 限制**：如果 `TELEPHONY_TX` 输出设备不存在（老旧 HAL < 3.0），则只允许使用 primary HW module 的输入设备，防止跨 HAL 路由
+- **SCO 最高优先**：与 Part 3 同理，当输出走 SCO 时录音也走 SCO MIC
+- **SPEAKER 免提模式特殊分支**：优先用 `BACK_MIC` 做 AEC 参考（远离扬声器），其次 `BUILTIN_MIC`，然后 USB
+- **BLE_HEADSET 分支**：LE Audio 录音优先匹配 BLE 输入设备，找不到则 fallthrough 到 default（有线 > USB > BLE > 内置 MIC）
+- **default 子 case** = `FORCE_NONE`，走标准外接优先级链
+
+---
+
+#### Part 5: 语音识别 & HOTWORD
+
+```cpp
+    case AUDIO_SOURCE_VOICE_RECOGNITION:
+    case AUDIO_SOURCE_UNPROCESSED:
+        if (audio_is_bluetooth_out_sco_device(commDeviceType)) {
+            device = availableDevices.getDevice(
+                    AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET, String8(""), AUDIO_FORMAT_DEFAULT);
+            if (device != nullptr) break;
+        }
+        // we need to make BLUETOOTH_BLE has higher priority than BUILTIN_MIC,
+        // because sometimes user want to do voice search by bt remote
+        // even if BUILDIN_MIC is available.
+        device = availableDevices.getFirstExistingDevice({
+                AUDIO_DEVICE_IN_WIRED_HEADSET,
+                AUDIO_DEVICE_IN_USB_HEADSET, AUDIO_DEVICE_IN_USB_DEVICE,
+                AUDIO_DEVICE_IN_BLUETOOTH_BLE, AUDIO_DEVICE_IN_BUILTIN_MIC});
+        break;
+
+    case AUDIO_SOURCE_HOTWORD:
+        // We should not use primary output criteria for Hotword but rather limit
+        // to devices attached to the same HW module as the build in mic
+        if (!availablePrimaryDevices.isEmpty()) {
+            availableDevices = availablePrimaryDevices;
+        }
+        if (audio_is_bluetooth_out_sco_device(commDeviceType)) {
+            device = availableDevices.getDevice(
+                    AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET, String8(""), AUDIO_FORMAT_DEFAULT);
+            if (device != nullptr) break;
+        }
+        device = availableDevices.getFirstExistingDevice({
+                AUDIO_DEVICE_IN_WIRED_HEADSET,
+                AUDIO_DEVICE_IN_USB_HEADSET, AUDIO_DEVICE_IN_USB_DEVICE,
+                AUDIO_DEVICE_IN_BUILTIN_MIC});
+        break;
+```
+
+**分析：**
+- `VOICE_RECOGNITION` / `UNPROCESSED`：优先级与 `MIC` 相同，但注意 AOSP 注释 — **BLE 优先于 BUILTIN_MIC**，因为用户可能想通过 BT 遥控器做语音搜索
+- `HOTWORD`（唤醒词检测）关键区别：
+  - **限制为 primary HW module 设备**：唤醒词通常由 DSP 低功耗检测，必须在同一 HAL 内处理
+  - **不包含 `BLUETOOTH_BLE`**：低功耗唤醒不走蓝牙（功耗太高）
+  - 优先级链中少了 BLE，只有 `WIRED > USB > BUILTIN_MIC`
+
+---
+
+#### Part 6: CAMCORDER & 固定设备映射
+
+```cpp
+    case AUDIO_SOURCE_CAMCORDER:
+        // For a device without built-in mic, adding usb device
+        device = availableDevices.getFirstExistingDevice({
+                AUDIO_DEVICE_IN_BACK_MIC, AUDIO_DEVICE_IN_BUILTIN_MIC,
+                AUDIO_DEVICE_IN_USB_DEVICE});
+        break;
+
+    case AUDIO_SOURCE_VOICE_DOWNLINK:
+    case AUDIO_SOURCE_VOICE_CALL:
+    case AUDIO_SOURCE_VOICE_UPLINK:
+        device = availableDevices.getDevice(
+                AUDIO_DEVICE_IN_VOICE_CALL, String8(""), AUDIO_FORMAT_DEFAULT);
+        break;
+
+    case AUDIO_SOURCE_VOICE_PERFORMANCE:
+        device = availableDevices.getFirstExistingDevice({
+                AUDIO_DEVICE_IN_WIRED_HEADSET, AUDIO_DEVICE_IN_USB_HEADSET,
+                AUDIO_DEVICE_IN_USB_DEVICE, AUDIO_DEVICE_IN_BLUETOOTH_BLE,
+                AUDIO_DEVICE_IN_BUILTIN_MIC});
+        break;
+
+    case AUDIO_SOURCE_REMOTE_SUBMIX:
+        device = availableDevices.getDevice(
+                AUDIO_DEVICE_IN_REMOTE_SUBMIX, String8(""), AUDIO_FORMAT_DEFAULT);
+        break;
+    case AUDIO_SOURCE_FM_TUNER:
+        device = availableDevices.getDevice(
+                AUDIO_DEVICE_IN_FM_TUNER, String8(""), AUDIO_FORMAT_DEFAULT);
+        break;
+    case AUDIO_SOURCE_ECHO_REFERENCE:
+        device = availableDevices.getDevice(
+                AUDIO_DEVICE_IN_ECHO_REFERENCE, String8(""), AUDIO_FORMAT_DEFAULT);
+        break;
+    case AUDIO_SOURCE_ULTRASOUND:
+        device = availableDevices.getFirstExistingDevice({
+                AUDIO_DEVICE_IN_BUILTIN_MIC, AUDIO_DEVICE_IN_BACK_MIC});
+        break;
+    default:
+        ALOGW("getDeviceForInputSource() invalid input source %d", inputSource);
+        break;
     }
+```
+
+**分析：**
+- **`CAMCORDER`**：`BACK_MIC > BUILTIN_MIC > USB_DEVICE`。注释说明"无内置 MIC 的设备才走 USB"。**关键：不跟随耳机切换**，即使插了有线耳机仍用后置 MIC，因为录视频需要靠近镜头的 MIC
+- **`VOICE_CALL` / `VOICE_UPLINK` / `VOICE_DOWNLINK`**：固定映射到 `VOICE_CALL` 虚拟设备（即 Modem TELEPHONY_RX 侧），不受外接设备影响
+- **`VOICE_PERFORMANCE`**：K歌专用 source，优先级链与通用 MIC 类相同（`WIRED > USB > BLE > BUILTIN`），但**不受 SCO 影响**（不会去查 `commDeviceType`），因为 K 歌场景不走通话链路
+- **`REMOTE_SUBMIX` / `FM_TUNER` / `ECHO_REFERENCE`**：固定映射到对应的虚拟/专用设备，不走任何优先级
+- **`ULTRASOUND`**：超声波感应优先用 `BUILTIN_MIC`，其次 `BACK_MIC`（与其他 source 相反，因为超声波传感器通常集成在前面板）
+
+---
+
+#### Part 7: 兜底逻辑
+
+```cpp
+    if (device == nullptr) {
+        ALOGV("getDeviceForInputSource() no device found for source %d", inputSource);
+        device = availableDevices.getDevice(
+                AUDIO_DEVICE_IN_STUB, String8(""), AUDIO_FORMAT_DEFAULT);
+        ALOGE_IF(device == nullptr,
+                 "getDeviceForInputSource() no default device defined");
+    }
+    return device;
 }
 ```
+
+**分析：**
+- 所有 case 都没命中时，返回 `STUB` 设备（HAL 中的空实现占位符）
+- 如果连 STUB 都没有则打 `ALOGE`，表示 `audio_policy_configuration.xml` 配置缺失
 
 **为什么这样设计？**
 

@@ -4,14 +4,271 @@
 
 ---
 
-## 1. 启动与初始化流程 (Initialization Sequence)
+## 1. AOSP 源码目录结构与核心类
 
-### 1.1 进程启动与实例化
+### 1.1 源码目录结构
+
+AudioFlinger 源码位于 `frameworks/av/services/audioflinger/`：
+
+```
+frameworks/av/services/audioflinger/
+├── AudioFlinger.cpp / .h             ← 主类: Binder 服务入口, 管理线程/设备
+├── Threads.cpp / .h                  ← 所有线程类实现 (PlaybackThread/RecordThread/...)
+├── Tracks.cpp / .h                   ← 所有 Track 类实现 (Track/RecordTrack/PatchTrack)
+├── Effects.cpp / .h                  ← 音效链管理 (EffectModule/EffectChain/EffectHandle)
+├── FastMixer.cpp / .h                ← FastMixer 独立线程 (高优先级低延迟混音)
+├── FastCapture.cpp / .h              ← FastCapture 独立线程 (高优先级低延迟录音)
+├── AudioStreamOut.cpp / .h           ← 封装 HAL output stream 接口
+├── AudioStreamIn.cpp / .h            ← 封装 HAL input stream 接口
+├── AudioHwDevice.cpp / .h            ← 封装 HAL device 接口
+├── PatchPanel.cpp / .h               ← AudioPatch 管理 (端到端连接)
+├── MelReporter.cpp / .h              ← 声压级监测 (Android 14+ 听力保护)
+├── DeviceEffectManager.cpp / .h      ← 设备级音效管理
+└── Android.bp                        ← 编译为 libaudioflinger.so
+
+相关库:
+  frameworks/av/media/libaudioprocessing/
+    ├── AudioMixer.cpp / .h           ← 软件混音器核心
+    ├── AudioResampler*.cpp           ← 多相重采样器
+    └── RecordBufferConverter.cpp     ← 录音格式转换
+```
+
+### 1.2 核心类及职责
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ AudioFlinger (主类, Binder 服务)                                  │
+│                                                                   │
+│  职责:                                                            │
+│    - 接收 AudioPolicyService 请求 (loadHwModule/openOutput/...)   │
+│    - 接收 AudioTrack/AudioRecord 请求 (createTrack/createRecord)  │
+│    - 管理 mPlaybackThreads / mRecordThreads / mMmapThreads       │
+│    - 管理 mAudioHwDevs (已加载的 HAL 设备)                        │
+│    - PatchPanel: 管理所有 AudioPatch                              │
+│                                                                   │
+│  关键数据成员:                                                     │
+│    DefaultKeyedVector<audio_io_handle_t, sp<PlaybackThread>>      │
+│        mPlaybackThreads;            ← 所有播放线程 (按 output id) │
+│    DefaultKeyedVector<audio_io_handle_t, sp<RecordThread>>        │
+│        mRecordThreads;              ← 所有录音线程 (按 input id)  │
+│    DefaultKeyedVector<audio_module_handle_t, AudioHwDevice*>      │
+│        mAudioHwDevs;                ← 已加载的 HAL 设备           │
+│    sp<PatchPanel> mPatchPanel;      ← Patch 管理器                │
+│    float mMasterVolume;             ← 主音量                      │
+│    bool mMasterMute;                ← 主静音                      │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ PlaybackThread (播放线程基类) → Threads.cpp                       │
+│                                                                   │
+│  子类继承树:                                                      │
+│    ThreadBase                                                     │
+│      └── PlaybackThread                                           │
+│            ├── MixerThread         ← 标准混音 (多 Track 叠加)    │
+│            │     └── DirectOutputThread  ← 直通 (单 Track 无混音)│
+│            │           └── OffloadThread  ← 硬件卸载解码          │
+│            ├── DuplicatingThread   ← 复制输出到多个 Thread        │
+│            ├── SpatializerThread   ← 空间音频专用                 │
+│            ├── BitPerfectThread    ← 位完美直通                   │
+│            └── MmapPlaybackThread  ← AAudio MMAP 模式            │
+│                                                                   │
+│  关键方法:                                                        │
+│    threadLoop()           ← 核心死循环 (prepare→mix→effect→write) │
+│    createTrack_l()        ← 在此线程创建一个 Track                │
+│    prepareTracks_l()      ← 遍历 Track, 配置 AudioMixer          │
+│    threadLoop_mix()       ← 调用 AudioMixer::process()            │
+│    threadLoop_write()     ← 写入 HAL (mOutput->write)            │
+│    setParameters()        ← 接收路由参数 (如 "routing=2")         │
+│                                                                   │
+│  关键数据:                                                        │
+│    SortedVector<sp<Track>> mTracks;       ← 所有已创建的 Track    │
+│    SortedVector<sp<Track>> mActiveTracks; ← 活跃播放中的 Track    │
+│    AudioMixer* mAudioMixer;               ← 混音器实例            │
+│    AudioStreamOut* mOutput;               ← HAL output stream     │
+│    void* mSinkBuffer;                     ← 写入 HAL 的数据缓冲  │
+│    void* mMixerBuffer;                    ← 混音中间结果缓冲      │
+│    void* mEffectBuffer;                   ← 音效处理结果缓冲      │
+│    sp<FastMixer> mFastMixer;              ← FastMixer 线程 (可选) │
+│    Vector<sp<EffectChain>> mEffectChains; ← 音效链列表            │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ RecordThread (录音线程) → Threads.cpp                             │
+│                                                                   │
+│  职责:                                                            │
+│    - 从 HAL 读取 PCM 数据 (mInput->read)                         │
+│    - 分发给各 RecordTrack (支持多客户端并发录音)                   │
+│    - 可选: 通过 FastCapture 低延迟采集                            │
+│                                                                   │
+│  关键方法:                                                        │
+│    threadLoop()           ← 循环: read HAL → 分发给 RecordTrack   │
+│    createRecordTrack_l()  ← 创建一个录音 Track                    │
+│                                                                   │
+│  关键数据:                                                        │
+│    SortedVector<sp<RecordTrack>> mTracks;                         │
+│    AudioStreamIn* mInput;                 ← HAL input stream      │
+│    sp<FastCapture> mFastCapture;          ← FastCapture (可选)    │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ Track / RecordTrack → Tracks.cpp                                  │
+│                                                                   │
+│  Track (播放):                                                    │
+│    - 代表 App 的一路音频流                                        │
+│    - 内含共享内存 (cblk + PCM Buffer)                             │
+│    - AudioTrackServerProxy: 服务端环形缓冲区操作                  │
+│    - 状态机: IDLE→ACTIVE→PAUSED→STOPPED                          │
+│                                                                   │
+│  RecordTrack (录音):                                              │
+│    - 代表 App 的一路录音请求                                      │
+│    - AudioRecordServerProxy: 服务端写入录音数据                   │
+│    - 支持 silenced 模式 (并发录音低优先级时静音)                  │
+│                                                                   │
+│  PatchTrack / PatchRecord:                                        │
+│    - AudioPatch 内部数据传输用                                    │
+│    - 连接两个 Thread (如: RecordThread → PlaybackThread)          │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ EffectModule / EffectChain → Effects.cpp                          │
+│                                                                   │
+│  EffectChain:                                                     │
+│    - 挂载在某个 Thread 上, 按 Session ID 组织                     │
+│    - 包含多个 EffectModule (如 EQ + Reverb + Compressor)          │
+│    - process_l(): 对混音结果做音效处理                             │
+│                                                                   │
+│  EffectModule:                                                    │
+│    - 封装一个 HAL Effect 实例                                     │
+│    - 通过 IFactory→IEffect HIDL/AIDL 接口调用厂商音效库          │
+│                                                                   │
+│  EffectHandle:                                                    │
+│    - App 持有的引用, 控制参数 (setParameter/getParameter)         │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ FastMixer → FastMixer.cpp                                         │
+│                                                                   │
+│  独立高优先级线程 (SCHED_FIFO, 最高实时优先级)                    │
+│  职责:                                                            │
+│    - 管理所有 FastTrack 的混音                                    │
+│    - 接收 NormalTrack 混音结果作为一路输入                         │
+│    - 以 HAL buffer 为周期写入硬件                                 │
+│    - 延迟 = 1 × HAL buffer size (通常 ~5ms)                      │
+│                                                                   │
+│  与 MixerThread 协作:                                             │
+│    MixerThread (低优先级):                                        │
+│      → 混合所有 NormalTrack → 结果写入 mNormalSink                │
+│    FastMixer (高优先级):                                          │
+│      → 读取 mNormalSink + 所有 FastTrack → 混合 → 写 HAL         │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ PatchPanel → PatchPanel.cpp                                       │
+│                                                                   │
+│  管理端到端 AudioPatch:                                           │
+│    - Device → Device (硬件直连, 不经过 AudioFlinger 混音)         │
+│    - Device → Mix (录音路径)                                      │
+│    - Mix → Device (播放路径)                                      │
+│    - Mix → Mix (Thread 间数据传递, 用 PatchTrack)                 │
+│                                                                   │
+│  内部用 PatchTrack + PatchRecord 实现跨 Thread 数据搬运            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 1.3 关键调用关系总览
+
+```
+═══════════════════════════════════════════════════════════════════
+外部 → AudioFlinger 的调用入口
+═══════════════════════════════════════════════════════════════════
+
+AudioPolicyService (通过 AudioPolicyClientImpl):
+  ├── loadHwModule(name)           → 加载 HAL .so, 创建 AudioHwDevice
+  ├── openOutput(module, ...)      → 创建 PlaybackThread, 加入 mPlaybackThreads
+  ├── openInput(module, ...)       → 创建 RecordThread, 加入 mRecordThreads
+  ├── closeOutput(output)          → 销毁 PlaybackThread
+  ├── createAudioPatch(patch)      → PatchPanel 创建端到端连接
+  ├── setParameters(ioHandle, kv)  → Thread→HAL 传递参数 (如路由切换)
+  └── moveEffects(session, src, dst) → 迁移音效链到另一个 Thread
+
+AudioTrack (通过 IAudioFlinger Binder):
+  ├── createTrack(...)             → 在目标 PlaybackThread 中创建 Track
+  │     → thread->createTrack_l()
+  │     → 分配 Ashmem 共享内存 (cblk + buffer)
+  │     → 返回 IAudioTrack 代理
+  └── start/stop/pause             → Track 状态机切换
+
+AudioRecord (通过 IAudioFlinger Binder):
+  └── createRecord(...)            → 在目标 RecordThread 中创建 RecordTrack
+
+═══════════════════════════════════════════════════════════════════
+AudioFlinger 内部: 播放 threadLoop 调用链
+═══════════════════════════════════════════════════════════════════
+
+PlaybackThread::threadLoop() [每 ~5-20ms 循环一次]
+  │
+  ├── prepareTracks_l()
+  │     遍历 mActiveTracks:
+  │       - 检查 Track 状态 (ACTIVE/PAUSING/STOPPING)
+  │       - 从 Track 共享内存获取可用数据帧
+  │       - 配置 AudioMixer (buffer 地址, 增益, 重采样参数)
+  │       - 标记 NormalTrack 或 FastTrack
+  │
+  ├── threadLoop_mix()
+  │     mAudioMixer->process()
+  │       - 根据 Track 属性选择最优 hook 函数
+  │       - 多路 PCM 数据加权叠加 → mMixerBuffer
+  │       - 处理重采样 (如有需要)
+  │       - 增益 Ramp (避免 pop/click)
+  │
+  ├── EffectChain::process_l()
+  │     输入: mMixerBuffer → 输出: mEffectBuffer
+  │     依次调用链上每个 EffectModule::process()
+  │
+  ├── memcpy_by_audio_format()
+  │     mEffectBuffer (float32) → mSinkBuffer (HAL 期望格式 int16/int32)
+  │
+  └── threadLoop_write()
+        mOutput->write(mSinkBuffer, frameCount)
+          → StreamOutHalHidl::write()
+            → HAL stream_out->write()
+              → TinyALSA pcm_write()
+                → ALSA Driver → Codec → Speaker/Headset
+
+═══════════════════════════════════════════════════════════════════
+AudioFlinger 内部: 录音 threadLoop 调用链
+═══════════════════════════════════════════════════════════════════
+
+RecordThread::threadLoop() [每 ~20ms 循环一次]
+  │
+  ├── mInput->read(mRsmpInBuffer, frameCount)
+  │     → HAL stream_in->read()
+  │       → TinyALSA pcm_read()
+  │         → ALSA Driver ← Codec ← MIC
+  │
+  ├── 重采样 (如果 RecordTrack 请求采样率 ≠ HAL 采样率)
+  │     mResampler->resample(mRsmpOutBuffer, framesOut)
+  │
+  └── 分发给每个活跃的 RecordTrack:
+        for (track : mActiveTracks):
+          buffer = track->getBuffer()   → 获取共享内存可写区域
+          if (track->isSilenced())
+            memset(buffer, 0, size)     → 注入静音
+          else
+            memcpy(buffer, mRsmpOutBuffer, size) → 写入录音数据
+          track->releaseBuffer()        → 更新写指针, App 侧可读
+```
+
+---
+
+## 2. 启动与初始化流程 (Initialization Sequence)
+
+### 2.1 进程启动与实例化
 1.  **启动入口**：系统解析 `audioserver.rc`，启动 `/system/bin/audioserver`。
 2.  **实例化**：`main_audioserver.cpp` 调用 `AudioFlinger::instantiate()`。
 3.  **构造函数**：初始化 `mPlaybackThreads`, `mRecordThreads` 等容器，并创建 `DevicesFactoryHalInterface` 句柄用于 HAL 加载。
 
-### 1.2 HAL 加载链路 (Loading HAL)
+### 2.2 HAL 加载链路 (Loading HAL)
 当 AudioPolicy 请求加载硬件模块时，链路如下：
 `AudioFlinger::loadHwModule_l()` 
 -> `DevicesFactoryHalHidl::openDevice()`
@@ -19,7 +276,7 @@
 -> **`hw_get_module_by_class(AUDIO_HARDWARE_MODULE_ID, if_name, &mod)`**
 *此步骤会根据 `audio.primary.so` 等厂商库名称在系统目录中进行 dlopen 加载。*
 
-### 1.3 输出线程创建时机
+### 2.3 输出线程创建时机
 
 AudioPolicy 在解析 `audio_policy_configuration.xml` 后，会对每个 `<mixPort>` 调用：
 ```
@@ -45,7 +302,7 @@ AudioPolicyManager::initialize()
 
 ---
 
-## 2. 线程模型全景图 (Thread Model)
+## 3. 线程模型全景图 (Thread Model)
 
 AudioFlinger 为每个物理输出设备创建一个线程实例。
 
@@ -61,7 +318,7 @@ AudioFlinger 为每个物理输出设备创建一个线程实例。
 | **SpatializerThread** | `SPATIALIZER` | **空间音频播放**。空间音频专用线程，自动附加虚拟化效果。 |
 | **BitPerfectThread** | `BIT_PERFECT` | **直通播放**。位完美播放（基于 MixerThread），尽量无处理直通。 |
 
-### 2.1 线程与 Output 的对应关系
+### 3.1 线程与 Output 的对应关系
 
 ```mermaid
 graph TD
@@ -92,7 +349,7 @@ graph TD
     AF --> OT --> H5
 ```
 
-### 2.2 线程优先级与调度
+### 3.2 线程优先级与调度
 
 | 线程类型 | 调度策略 | 优先级 | 周期 |
 |:---|:---|:---|:---|
@@ -102,9 +359,9 @@ graph TD
 
 ---
 
-## 3. Track 生命周期管理
+## 4. Track 生命周期管理
 
-### 3.1 Track 的创建
+### 4.1 Track 的创建
 
 当 App 通过 `AudioTrack` 请求播放时，AudioFlinger 在对应的 PlaybackThread 中创建一个 `Track` 对象：
 
@@ -126,7 +383,7 @@ sp<IAudioTrack> AudioFlinger::createTrack(const CreateTrackInput& input, ...) {
 }
 ```
 
-### 3.2 Track 状态机
+### 4.2 Track 状态机
 
 ```mermaid
 stateDiagram-v2
@@ -150,7 +407,7 @@ stateDiagram-v2
 *   状态切换是**异步**的——App 调用 `pause()` 只是设置一个标记，真正的状态转换发生在 `threadLoop` 的 `prepareTracks_l()` 中
 *   `STOPPING_1 → STOPPING_2`：确保 Track 中的残余数据被完整播放（drain），而非突然截断
 
-### 3.3 Track 类型层次
+### 4.3 Track 类型层次
 
 ```
 TrackBase
@@ -163,11 +420,11 @@ TrackBase
 
 ---
 
-## 4. FastTrack vs NormalTrack 深度对比
+## 5. FastTrack vs NormalTrack 深度对比
 
 这是 AudioFlinger 中最重要的性能分界线。
 
-### 4.1 对比表
+### 5.1 对比表
 
 | 特性 | NormalTrack | FastTrack |
 |:---|:---|:---|
@@ -180,7 +437,7 @@ TrackBase
 | **延迟** | ~50-200ms | ~5-20ms |
 | **Underrun 容忍度** | 高 (大 buffer 缓冲) | 低 (容易出现 glitch) |
 
-### 4.2 FastMixer 工作原理
+### 5.2 FastMixer 工作原理
 
 ```mermaid
 graph TD
@@ -209,7 +466,7 @@ graph TD
 
 **核心机制**：NormalTrack 的混音结果被当作 FastMixer 的「一条虚拟 FastTrack」混入最终输出。
 
-### 4.3 FastTrack 准入条件
+### 5.3 FastTrack 准入条件
 
 App 创建 AudioTrack 时携带 `AUDIO_OUTPUT_FLAG_FAST`，但 AudioFlinger 会严格检查：
 
@@ -239,11 +496,11 @@ if (flags & AUDIO_OUTPUT_FLAG_FAST) {
 
 ---
 
-## 5. threadLoop 核心循环源码级剖析
+## 6. threadLoop 核心循环源码级剖析
 
 所有播放线程的基类逻辑都在 `threadLoop()` 这个死循环中。
 
-### 5.1 完整处理流程 (Threads.cpp)
+### 6.1 完整处理流程 (Threads.cpp)
 ```cpp
 bool AudioFlinger::PlaybackThread::threadLoop() {
     while (!exitPending()) {
@@ -283,7 +540,7 @@ bool AudioFlinger::PlaybackThread::threadLoop() {
 }
 ```
 
-### 5.2 Buffer 链路详解
+### 6.2 Buffer 链路详解
 
 理解 AudioFlinger 内部的 Buffer 传递是定位音频问题的关键：
 
@@ -317,23 +574,23 @@ graph LR
 
 ---
 
-## 6. AudioMixer 混音器深度细节
+## 7. AudioMixer 混音器深度细节
 
 `AudioMixer` 运行在 `libaudioprocessing.so` 中，它是通过 `setParameter` 接口进行配置的。
 
-### 6.1 Buffer 挂载路径
+### 7.1 Buffer 挂载路径
 在 `MixerThread::prepareTracks_l` 中：
 ```cpp
 // 将混音器的输出缓冲区设置为线程的临时混音缓冲区
 mAudioMixer->setParameter(trackId, AudioMixer::TRACK, AudioMixer::MAIN_BUFFER, (void *)mMixerBuffer);
 ```
 
-### 6.2 饱和截断算法 (Saturation)
+### 7.2 饱和截断算法 (Saturation)
 对于每个采样点 $n$，AudioMixer 使用汇编优化的饱和指令：
 $Sample_{out} = \text{clamp}(\sum Sample_i \times Gain_i, -32768, 32767)$
 这保证了当多路大响度声音叠加时，结果不会产生整数溢出的尖锐杂音（炸音）。
 
-### 6.3 混音处理函数选择策略
+### 7.3 混音处理函数选择策略
 
 AudioMixer 根据 Track 的属性动态选择最优的处理函数（hook）：
 
@@ -344,7 +601,7 @@ AudioMixer 根据 Track 的属性动态选择最优的处理函数（hook）：
 | 需要重采样 | `process__genericResampling` | 调用 Resampler |
 | 通用 (float 内部格式) | `process__oneTrack...` / `process__noResampleOneTrack` | Android 9+ 默认 float |
 
-### 6.4 增益控制与 Ramp
+### 7.4 增益控制与 Ramp
 
 为避免音量突变产生 Pop/Click 噪声，AudioMixer 使用**增益渐变 (Gain Ramp)**：
 
@@ -361,11 +618,11 @@ for (size_t i = 0; i < frameCount; i++) {
 
 ---
 
-## 7. 重采样器 (Resampler) 深度解析
+## 8. 重采样器 (Resampler) 深度解析
 
 当 Track 的采样率与 PlaybackThread 的 HAL 采样率不一致时，AudioMixer 自动启用重采样器。
 
-### 7.1 重采样质量等级
+### 8.1 重采样质量等级
 
 | 质量等级 | 滤波器阶数 | CPU 开销 | 适用场景 |
 |:---|:---|:---|:---|
@@ -374,7 +631,7 @@ for (size_t i = 0; i < frameCount; i++) {
 | `DYN_HIGH_QUALITY` | 20 阶 | 较高 | 音乐播放 (默认) |
 | `AUDIO_RESAMPLER_QUALITY_MAX` | 32+ 阶 | 最高 | 专业音频 |
 
-### 7.2 动态多相滤波器 (Polyphase Resampling)
+### 8.2 动态多相滤波器 (Polyphase Resampling)
 
 ```
 输入: 44100Hz → 输出: 48000Hz
@@ -388,7 +645,7 @@ for (size_t i = 0; i < frameCount; i++) {
   - 实际通过查表避免插零/抽取，直接计算目标样本
 ```
 
-### 7.3 重采样导致的延迟
+### 8.3 重采样导致的延迟
 
 重采样器引入的额外延迟 = 滤波器长度 / 2：
 *   `DYN_HIGH_QUALITY`: ~1ms 额外延迟
@@ -396,11 +653,11 @@ for (size_t i = 0; i < frameCount; i++) {
 
 ---
 
-## 8. 内存共享机制：Ashmem 与 Proxy
+## 9. 内存共享机制：Ashmem 与 Proxy
 
 为了实现零拷贝，Android 使用 `AudioTrackServerProxy` 和 `AudioTrackClientProxy` 管理环形缓冲区。
 
-### 8.1 环形缓冲区结构
+### 9.1 环形缓冲区结构
 
 ```mermaid
 graph LR
@@ -427,34 +684,14 @@ graph LR
     SP -.-> |"原子操作更新"| CB 
 
 ```
-```c++
-// ===AF和APP之间 cblk关键结构体 volatile和android_atomic_acquire_load保证无锁队列==
-struct AudioTrackSharedStreaming {
-    // similar to NBAIO MonoPipe
-    // in continuously incrementing frame units, take modulo buffer size, which must be a power of 2
-    volatile int32_t mFront;    // read by consumer (output: server, input: client)
-    volatile int32_t mRear;     // written by producer (output: client, input: server)
-    volatile int32_t mFlush;    // incremented by client to indicate a request to flush;
-                                // server notices and discards all data between mFront and mRear
-    volatile int32_t mStop;     // set by client to indicate a stop frame position; server
-                                // will not read beyond this position until start is called.
-    volatile uint32_t mUnderrunFrames; // server increments for each unavailable but desired frame
-    volatile uint32_t mUnderrunCount;  // server increments for each underrun occurrence
-};
 
-APP： front = android_atomic_acquire_load(&cblk->u.mStreaming.mFront);  //获取读指针
-      rear = cblk->u.mStreaming.mRear;
-
-AF：  rear = android_atomic_acquire_load(&mCblk->u.mStreaming.mRear);//获取写指针
-      front = cblk->u.mStreaming.mFront;
-```
 ### 8.2 Proxy 的原子操作
 
 *   `obtainBuffer()`：申请一块可写/可读的内存
 *   `releaseBuffer()`：更新 `sw_ptr` (应用侧) 或 `hw_ptr` (Flinger 侧)
 *   **同步逻辑**：Client 写入数据后更新指针，Server 端在 `threadLoop` 循环中检测到指针变化即开始消费
 
-### 8.3 Buffer 大小计算
+### 9.3 Buffer 大小计算
 
 AudioFlinger 为 Track 分配 Buffer 时的计算逻辑：
 
@@ -477,7 +714,7 @@ Deep Buffer:
   → 实际 buffer ≈ 80-160ms
 ```
 
-### 8.4 Underrun 与 Overrun 处理
+### 9.4 Underrun 与 Overrun 处理
 
 | 问题 | 方向 | 原因 | 表现 | 处理 |
 |:---|:---|:---|:---|:---|
@@ -486,9 +723,9 @@ Deep Buffer:
 
 ---
 
-## 9. 专家调试与 Dump 实战分析
+## 10. 专家调试与 Dump 实战分析
 
-### 9.1 获取 Dump 信息
+### 10.1 获取 Dump 信息
 
 ```bash
 # 完整 AudioFlinger dump
@@ -501,7 +738,7 @@ adb shell dumpsys media.audio_flinger -o <output_id>
 adb shell dumpsys media.audio_flinger --latency
 ```
 
-### 9.2 Dump 输出关键字段解读
+### 10.2 Dump 输出关键字段解读
 
 ```
 Output thread 0xb4000078deadbeef, name=AudioOut_2, tid=1234
@@ -524,7 +761,7 @@ Output thread 0xb4000078deadbeef, name=AudioOut_2, tid=1234
     Gain: L=1.000 R=1.000           ← 左右声道增益
 ```
 
-### 9.3 常见问题定位清单
+### 10.3 常见问题定位清单
 
 | 现象 | 关注的 Dump 字段 | 排查方向 |
 |:---|:---|:---|
@@ -535,7 +772,7 @@ Output thread 0xb4000078deadbeef, name=AudioOut_2, tid=1234
 | **音效未生效** | `Effect Chains` 为空 | 检查 Session ID 绑定 / EffectFactory 注册 |
 | **功耗异常** | `Standby: no` (无播放时) | 某个 Track 未正确 stop/release |
 
-### 9.4 实时监控脚本
+### 10.4 实时监控脚本
 
 ```bash
 # 持续监控 Underrun 变化
@@ -560,6 +797,17 @@ data_sources {
 duration_ms: 5000
 EOF
 ```
+
+---
+
+## 相关章节
+
+AudioFlinger 是音频执行层，以下主题在专门章节中深入展开：
+
+- **音效处理框架**：EffectChain/EffectModule 如何加载、挂载到 Thread 及 Buffer 传递 → [08-AudioEffect.md](./08-AudioEffect.md)
+- **录音详细流程**：AudioRecord 创建 → RecordThread 数据分发全链路 → [04-AudioRecord.md](./04-AudioRecord.md)
+- **MMAP/AAudio 低延迟路径**：MmapPlaybackThread / MmapCaptureThread 独占 DMA 机制 → [10-Oboe-AAudio.md](./10-Oboe-AAudio.md)
+- **路由决策与设备管理**：AudioPolicy 如何选择 Output/Device 并通知 AudioFlinger → [06-AudioPolicy.md](./06-AudioPolicy.md)
 
 ---
 *Next Topic: [AudioPolicy 策略管理深度解析](./06-AudioPolicy.md)*

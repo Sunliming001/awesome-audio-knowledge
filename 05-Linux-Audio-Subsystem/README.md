@@ -26,5 +26,13 @@
     *   `snd_soc_bind_card` 核心函数解析。
     *   DAI Link 的 FE 与 BE 概念。
 
+5.  **[音频时钟与 DMA 传输 (Audio Clock & DMA Engine)](./05-Audio-Clock-DMA.md)**
+    *   音频 PLL 与时钟树：48kHz / 44.1kHz 双家族、MCLK/BCLK/LRCLK 关系。
+    *   Linux CCF (Common Clock Framework) 中的音频时钟配置。
+    *   DMA Engine 框架：环形 Buffer、Descriptor Chain、Period 中断机制。
+    *   Device Tree DMA 配置示例（高通 LPAIF）。
+    *   Regmap 寄存器缓存：regcache suspend/resume、debugfs 调试。
+    *   Clock Drift 与多设备同步方案。
+
 ---
 [返回主目录](../README.md)
